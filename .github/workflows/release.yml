@@ -32,7 +32,7 @@ jobs:
         run: cargo test --workspace
       - name: Test the launcher
         working-directory: js
-        run: node --test test/
+        run: node --test test/*.test.mjs
       - name: Generate manifest and checksums
         env:
           VERSION: ${{ github.ref_name }}

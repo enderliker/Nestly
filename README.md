@@ -87,7 +87,7 @@ Command names are valid Discord names (`music-play`, not `music.play`).
 ```bash
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cd js && node --test test/
+cd js && node --test test/*.test.mjs
 ```
 
 The suite covers framing and handshake limits, secret redaction, the restart

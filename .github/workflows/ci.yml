@@ -45,7 +45,7 @@ jobs:
       - name: Syntax check
         run: node --check start.mjs
       - name: Tests
-        run: node --test test/
+        run: node --test test/*.test.mjs
 
   boot-budget:
     name: Boot budget

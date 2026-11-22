@@ -1,0 +1,64 @@
+# rsbot configuration.
+#
+# Copy to /home/container/rsbot.toml (or point RSBOT_CONFIG at it).
+# Service binaries are resolved inside the installed release directory, so a
+# bare file name never pins a version path.
+
+[discord]
+# Application (bot) id. One application serves the edge and every module.
+application_id = "123456789012345678"
+# Guild commands propagate instantly. Remove this line for global commands.
+guild_id = "223456789012345678"
+allowed_guild_ids = ["223456789012345678"]
+# Users allowed to run /ops-restart. Empty denies everyone.
+admin_user_ids = ["323456789012345678"]
+# Name of the environment variable holding the bot token.
+token_env = "DISCORD_TOKEN"
+
+[notifications]
+# Alert embed channel. RSBOT_ALERT_CHANNEL can supply it instead.
+channel_id = "423456789012345678"
+# Dedicated alert token; falls back to the bot token when unset.
+token_env = "RSBOT_OPS_TOKEN"
+max_log_lines = 40
+cooldown_secs = 300
+
+[supervisor]
+state_dir = "/home/container/rsbot-state"
+boot_deadline_ms = 1000
+handshake_timeout_ms = 500
+ready_timeout_ms = 750
+health_interval_ms = 1000
+health_miss_limit = 3
+max_restart_attempts = 3
+restart_backoff_ms = [100, 250, 500]
+stable_reset_secs = 60
+log_ring_lines = 500
+max_total_rss_mb = 4096
+log_level = "info"
+alert_sink = "discord"
+# alert_file = "/home/container/rsbot-state/alerts/alerts.jsonl"
+
+[supervisor.edge]
+binary = "rsbot-edge"
+enabled = true
+token_env = "DISCORD_TOKEN"
+
+[[modules]]
+id = "music"
+binary = "rsbot-mod-music"
+token_env = "DISCORD_TOKEN"
+commands = ["music-play", "music-skip"]
+events = ["interaction_create"]
+requires = ["discord.rest"]
+exclusive = ["voice.session"]
+max_rss_mb = 192
+
+[[modules]]
+id = "ops"
+binary = "rsbot-mod-ops"
+token_env = "DISCORD_TOKEN"
+commands = ["ops-status", "ops-modules", "ops-restart"]
+events = ["interaction_create"]
+requires = ["discord.rest", "supervisor.control"]
+max_rss_mb = 192

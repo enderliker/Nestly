@@ -1,0 +1,9 @@
+target
+.git
+.github
+js/node_modules
+rsbotbins
+state
+*.log
+.env
+.env.*

@@ -1,0 +1,19 @@
+services:
+  rsbot:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      RSBOT_CONFIG: /home/container/rsbot.toml
+      RSBOT_INSTALL_DIR: /home/container/rsbotbins
+      RSBOT_STATE_DIR: /home/container/rsbot-state
+    volumes:
+      - ./rsbot.toml:/home/container/rsbot.toml:ro
+      - rsbot-state:/home/container/rsbot-state
+      - rsbot-bins:/home/container/rsbotbins
+    stop_grace_period: 10s
+
+volumes:
+  rsbot-state:
+  rsbot-bins:

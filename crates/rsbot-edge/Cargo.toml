@@ -1,0 +1,33 @@
+[package]
+name = "rsbot-edge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "rsbot-edge"
+path = "src/main.rs"
+
+[dependencies]
+futures-util.workspace = true
+rsbot-core = { path = "../rsbot-core" }
+rsbot-ipc = { path = "../rsbot-ipc" }
+rsbot-sys = { path = "../rsbot-sys" }
+rustls.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+twilight-gateway.workspace = true
+twilight-http.workspace = true
+twilight-model.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "sync"] }
+
+[lints]
+workspace = true

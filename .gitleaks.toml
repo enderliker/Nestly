@@ -1,0 +1,14 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fixture tokens used by tests and documentation"
+paths = [
+  '''crates/rsbot-supervisor/tests/.*''',
+  '''crates/rsbot-edge/tests/.*''',
+  '''js/test/.*''',
+  '''docs/.*''',
+  '''README.md''',
+  '''.env.example''',
+  '''config/rsbot.example.toml''',
+]

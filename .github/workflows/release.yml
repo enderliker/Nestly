@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  TARGET: x86_64-unknown-linux-musl
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build static binaries
+        run: cargo build --release --workspace --target "$TARGET"
+      - name: Test
+        run: cargo test --workspace
+      - name: Test the launcher
+        working-directory: js
+        run: node --test test/
+      - name: Generate manifest and checksums
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          node scripts/release-manifest.mjs \
+            --dir "target/$TARGET/release" \
+            --out dist \
+            --version "${VERSION#v}" \
+            --target "$TARGET"
+      - name: Sign the manifest
+        env:
+          RSBOT_SIGNING_KEY: ${{ secrets.RSBOT_SIGNING_KEY }}
+        run: node scripts/sign-manifest.mjs dist/rsbot-manifest.json
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/rsbot-*
+            dist/SHA256SUMS
+          generate_release_notes: true
+          fail_on_unmatched_files: false

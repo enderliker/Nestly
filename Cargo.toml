@@ -1,0 +1,79 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rsbot-core",
+    "crates/rsbot-ipc",
+    "crates/rsbot-sys",
+    "crates/rsbot-supervisor",
+    "crates/rsbot-edge",
+    "crates/rsbot-module-sdk",
+    "crates/modules/music",
+    "crates/modules/ops",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "UNLICENSED"
+authors = ["enderliker"]
+repository = "https://github.com/enderliker/rsbot"
+
+[workspace.dependencies]
+aho-corasick = "1"
+bytes = "1"
+clap = { version = "4", features = ["derive"] }
+futures-util = { version = "0.3", features = ["sink"] }
+libc = "0.2"
+postcard = { version = "1", features = ["use-std"] }
+rand = "0.8"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rustls = { version = "0.23", features = ["ring"] }
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt", "signal", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+toml = "0.9"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "time"] }
+twilight-gateway = { version = "0.18", default-features = false, features = ["rustls-webpki-roots", "zstd"] }
+twilight-http = { version = "0.18", default-features = false, features = ["decompression", "rustls-webpki-roots"] }
+twilight-model = "0.18"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+too_many_lines = "allow"
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+similar_names = "allow"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+[profile.dev]
+opt-level = 1
+debug = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.test]
+opt-level = 1

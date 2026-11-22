@@ -1,0 +1,14 @@
+/target
+**/*.rs.bk
+.env
+.env.*
+!.env.example
+rsbotbins/
+state/
+logs/
+*.log
+*.pem
+*.key
+.DS_Store
+node_modules/
+coverage/

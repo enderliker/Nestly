@@ -82,6 +82,22 @@ pub async fn run() -> Result<(), EdgeError> {
 
     let mut shard = Shard::new(ShardId::ONE, token, Intents::GUILDS);
     let wanted = EventTypeFlags::INTERACTION_CREATE | EventTypeFlags::READY;
+    // Read the gateway in its own task. `select!` may then cancel only the
+    // receiver, never an in-flight WebSocket read.
+    let (gateway_tx, mut gateway_rx) = mpsc::channel::<Event>(128);
+    let gateway_task = tokio::spawn(async move {
+        while let Some(item) = shard.next_event(wanted).await {
+            match item {
+                Ok(event) => {
+                    if gateway_tx.send(event).await.is_err() {
+                        return;
+                    }
+                }
+                Err(source) => warn!(error = %source, "gateway receive error"),
+            }
+        }
+        warn!("gateway stream ended");
+    });
     let mut seq = 0_u64;
     let mut known_commands: Option<HashSet<String>> = None;
     let mut last_registered: Option<Vec<twilight_model::application::command::Command>> = None;
@@ -97,11 +113,17 @@ pub async fn run() -> Result<(), EdgeError> {
                 match envelope {
                     Envelope::Registry { modules } => {
                         let mut commands = commands_from_registry(&modules);
-                        commands.truncate(COMMAND_REGISTRY_LIMIT);
+                        if commands.len() > COMMAND_REGISTRY_LIMIT {
+                            warn!(
+                                declared = commands.len(),
+                                limit = COMMAND_REGISTRY_LIMIT,
+                                "discarding commands above the Discord limit"
+                            );
+                            commands.truncate(COMMAND_REGISTRY_LIMIT);
+                        }
                         known_commands = Some(
-                            modules
+                            commands
                                 .iter()
-                                .flat_map(|module| module.commands.iter())
                                 .map(|command| command.name.clone())
                                 .collect(),
                         );
@@ -135,6 +157,7 @@ pub async fn run() -> Result<(), EdgeError> {
                     }
                     Envelope::Shutdown { .. } => {
                         info!("shutdown requested by the supervisor");
+                        gateway_task.abort();
                         return Ok(());
                     }
                     Envelope::Ping => {
@@ -143,15 +166,15 @@ pub async fn run() -> Result<(), EdgeError> {
                     other => debug!(kind = other.kind(), "ignoring IPC envelope"),
                 }
             }
-            event = shard.next_event(wanted) => {
+            event = gateway_rx.recv() => {
                 let Some(event) = event else {
                     return Err(EdgeError::InvalidInteraction(
                         "gateway stream ended".to_owned(),
                     ));
                 };
                 match event {
-                    Ok(Event::Ready(_)) => info!("gateway is ready"),
-                    Ok(Event::InteractionCreate(interaction)) => {
+                    Event::Ready(_) => info!("gateway is ready"),
+                    Event::InteractionCreate(interaction) => {
                         let interaction = interaction.0;
                         let Ok(payload) = interaction_payload(&interaction) else {
                             warn!("dropping an interaction that cannot be encoded");
@@ -194,8 +217,7 @@ pub async fn run() -> Result<(), EdgeError> {
                             ));
                         }
                     }
-                    Ok(_) => {}
-                    Err(source) => warn!(error = %source, "gateway receive error"),
+                    _ => {}
                 }
             }
         }

@@ -694,7 +694,7 @@ fn override_supervisor(config: &Path, overrides: &[(&str, &str)]) {
         let mut found = false;
         for line in &mut lines {
             if line.starts_with(&prefix) {
-                *line = replacement.clone();
+                line.clone_from(&replacement);
                 found = true;
             }
         }

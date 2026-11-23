@@ -133,7 +133,12 @@ fn prctl(option: libc::c_int, value: libc::c_ulong) -> io::Result<()> {
     Ok(())
 }
 
-fn set_rlimit(resource: libc::__rlimit_resource_t, soft: u64, hard: u64) -> io::Result<()> {
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+type RlimitResource = libc::__rlimit_resource_t;
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+type RlimitResource = libc::c_int;
+
+fn set_rlimit(resource: RlimitResource, soft: u64, hard: u64) -> io::Result<()> {
     let limit = libc::rlimit {
         rlim_cur: soft as libc::rlim_t,
         rlim_max: hard as libc::rlim_t,

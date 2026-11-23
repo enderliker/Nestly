@@ -11,7 +11,8 @@ ENV RSBOT_INSTALL_DIR=/home/container/rsbotbins \
 COPY js /home/container/rsbot/js
 COPY config/rsbot.example.toml /home/container/rsbot.toml
 
-RUN chown -R container:container /home/container
+RUN mkdir -p /home/container/rsbot-state /home/container/rsbotbins \
+    && chown -R container:container /home/container
 
 USER container
 

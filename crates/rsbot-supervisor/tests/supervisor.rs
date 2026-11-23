@@ -806,3 +806,93 @@ fn hanging_handshake_is_retried_then_alerted() {
         alerts[0]["reason"]
     );
 }
+
+/// Runs the supervisor while draining both pipes, so a log flood cannot block.
+fn run_for_collecting(config: &Path, duration: Duration) -> String {
+    let mut child = supervisor_command(config, &[]).spawn().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let out_reader = std::thread::spawn(move || {
+        use std::io::Read;
+        let mut output = String::new();
+        std::io::BufReader::new(stdout)
+            .read_to_string(&mut output)
+            .unwrap();
+        output
+    });
+    let err_reader = std::thread::spawn(move || {
+        use std::io::Read;
+        let mut output = String::new();
+        std::io::BufReader::new(stderr)
+            .read_to_string(&mut output)
+            .unwrap();
+        output
+    });
+    sleep(duration);
+    let _ = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status();
+    let _ = child.wait();
+    let output = out_reader.join().unwrap();
+    let _ = err_reader.join();
+    output
+}
+
+#[test]
+fn two_modules_log_every_line_exactly_once() {
+    use std::collections::HashMap;
+
+    let dir = TempDir::new().unwrap();
+    let edge = edge_script(dir.path(), "passive", None, "music-play");
+    let music = module_script(
+        dir.path(),
+        "music.sh",
+        "flood",
+        &["music-play"],
+        &["voice.session"],
+    );
+    let ops = module_script(dir.path(), "ops.sh", "flood", &["ops-status"], &[]);
+    let config = config(
+        dir.path(),
+        &edge,
+        &[
+            ModuleEntry {
+                id: "music",
+                script: music,
+                commands: &["music-play"],
+                exclusive: &["voice.session"],
+            },
+            ModuleEntry {
+                id: "ops",
+                script: ops,
+                commands: &["ops-status"],
+                exclusive: &[],
+            },
+        ],
+        "",
+    );
+
+    let logs = run_for_collecting(&config, Duration::from_millis(2_000));
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for line in logs.lines() {
+        let Some(start) = line.find("flood-") else {
+            continue;
+        };
+        let tail = &line[start..];
+        let end = tail
+            .find(|character: char| !(character.is_ascii_alphanumeric() || character == '-'))
+            .unwrap_or(tail.len());
+        *counts.entry(tail[..end].to_owned()).or_default() += 1;
+    }
+
+    assert_eq!(counts.len(), 20_000, "missing or duplicate flood lines");
+    for (line, count) in &counts {
+        assert_eq!(*count, 1, "{line} was logged {count} times");
+    }
+    for id in ["music", "ops"] {
+        for number in 0..10_000 {
+            let line = format!("flood-{id}-{number}");
+            assert!(counts.contains_key(&line), "missing {line}");
+        }
+    }
+}

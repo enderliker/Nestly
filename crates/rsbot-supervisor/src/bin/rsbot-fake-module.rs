@@ -117,6 +117,22 @@ async fn main() {
         std::process::exit(9);
     }
 
+    if mode == "flood" {
+        let count = std::env::var("RSBOT_FAKE_FLOOD_LINES")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(10_000);
+        let flood_id = id.clone();
+        tokio::spawn(async move {
+            for line in 0..count {
+                println!("flood-{flood_id}-{line}");
+                if line % 100 == 0 {
+                    tokio::task::yield_now().await;
+                }
+            }
+        });
+    }
+
     let (sink, stream) = connection.split();
     let (outbound_tx, outbound_rx) = mpsc::channel::<Envelope>(64);
     let writer = tokio::spawn(writer_task(sink, outbound_rx));

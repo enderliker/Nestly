@@ -683,3 +683,126 @@ max_rss_mb = 192
         assert_eq!(service["state"], "ready", "{service}");
     }
 }
+
+/// Replaces a scalar key inside the generated [supervisor] section.
+fn override_supervisor(config: &Path, overrides: &[(&str, &str)]) {
+    let text = fs::read_to_string(config).unwrap();
+    let mut lines: Vec<String> = text.lines().map(ToOwned::to_owned).collect();
+    for (key, value) in overrides {
+        let prefix = format!("{key} = ");
+        let replacement = format!("{key} = {value}");
+        let mut found = false;
+        for line in &mut lines {
+            if line.starts_with(&prefix) {
+                *line = replacement.clone();
+                found = true;
+            }
+        }
+        assert!(
+            found,
+            "supervisor key {key} is not present in the generated config"
+        );
+    }
+    fs::write(config, format!("{}\n", lines.join("\n"))).unwrap();
+}
+
+#[test]
+fn missing_heartbeats_restart_then_alert() {
+    let dir = TempDir::new().unwrap();
+    let edge = edge_script(dir.path(), "passive", None, "music-play");
+    let music = module_script(
+        dir.path(),
+        "music.sh",
+        "no-heartbeat",
+        &["music-play"],
+        &["voice.session"],
+    );
+    let config = config(
+        dir.path(),
+        &edge,
+        &[ModuleEntry {
+            id: "music",
+            script: music,
+            commands: &["music-play"],
+            exclusive: &["voice.session"],
+        }],
+        "",
+    );
+    override_supervisor(
+        &config,
+        &[
+            ("health_interval_ms", "150"),
+            ("health_miss_limit", "2"),
+            ("max_restart_attempts", "2"),
+            ("restart_backoff_ms", "[50, 50, 50]"),
+        ],
+    );
+
+    let output = run_for(&config, Duration::from_millis(3_000));
+    assert!(output.status.success(), "{}", stderr(&output));
+    let logs = stdout(&output);
+    assert!(logs.contains("health check timed out"), "{logs}");
+    assert!(logs.contains("service failed"), "{logs}");
+
+    let alerts = read_jsonl(&dir.path().join("alerts.jsonl"));
+    assert!(!alerts.is_empty(), "no alert for the hung module");
+    assert_eq!(alerts[0]["module"], "music");
+    assert!(
+        alerts[0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("health check timed out"),
+        "{}",
+        alerts[0]["reason"]
+    );
+}
+
+#[test]
+fn hanging_handshake_is_retried_then_alerted() {
+    let dir = TempDir::new().unwrap();
+    let edge = edge_script(dir.path(), "passive", None, "music-play");
+    let music = module_script(
+        dir.path(),
+        "music.sh",
+        "hang-handshake",
+        &["music-play"],
+        &["voice.session"],
+    );
+    let config = config(
+        dir.path(),
+        &edge,
+        &[ModuleEntry {
+            id: "music",
+            script: music,
+            commands: &["music-play"],
+            exclusive: &["voice.session"],
+        }],
+        "",
+    );
+    override_supervisor(
+        &config,
+        &[
+            ("handshake_timeout_ms", "100"),
+            ("ready_timeout_ms", "100"),
+            ("max_restart_attempts", "2"),
+            ("restart_backoff_ms", "[50, 50, 50]"),
+        ],
+    );
+
+    let output = run_for(&config, Duration::from_millis(3_000));
+    assert!(output.status.success(), "{}", stderr(&output));
+    let logs = stdout(&output);
+    assert!(logs.contains("handshake timed out"), "{logs}");
+
+    let alerts = read_jsonl(&dir.path().join("alerts.jsonl"));
+    assert!(!alerts.is_empty(), "no alert for the hanging handshake");
+    assert_eq!(alerts[0]["module"], "music");
+    assert!(
+        alerts[0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("handshake timed out"),
+        "{}",
+        alerts[0]["reason"]
+    );
+}

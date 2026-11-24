@@ -1,0 +1,24 @@
+[package]
+name = "nestly-ipc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+bytes.workspace = true
+futures-util.workspace = true
+nestly-core = { path = "../nestly-core" }
+postcard.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
+
+[lints]
+workspace = true

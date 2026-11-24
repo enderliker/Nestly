@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * rsbot launcher.
+ * nestly launcher.
  *
  * Resolves a signed GitHub release, verifies every byte with SHA-256, installs
- * it atomically under /home/container/rsbotbins, starts the supervisor, and
+ * it atomically under /home/container/nestlybins, starts the supervisor, and
  * streams its logs to the container console. Zero npm dependencies.
  */
 
@@ -38,10 +38,10 @@ function downloadOptions(config) {
   };
 }
 
-async function requireAsset(release, name) {
-  const asset = release.assets.find((candidate) => candidate.name === name);
+async function requireAsset(release, ...names) {
+  const asset = release.assets.find((candidate) => names.includes(candidate.name));
   if (!asset) {
-    throw new GitHubError(`release ${release.tag} has no ${name} asset`);
+    throw new GitHubError(`release ${release.tag} has no ${names.join(' or ')} asset`);
   }
   return asset;
 }
@@ -83,7 +83,7 @@ async function prepareVersion(config, log) {
     const version = await verifiedInstalled(config);
     if (!version) {
       throw new Error(
-        'RSBOT_SKIP_UPDATE is set but no verified installed version exists',
+        'NESTLY_SKIP_UPDATE is set but no verified installed version exists',
       );
     }
     log(`launcher: using the installed version ${version} (updates disabled)`);
@@ -93,14 +93,18 @@ async function prepareVersion(config, log) {
   const target = releaseTarget();
   try {
     const release = await resolveRelease(config);
-    const manifestAsset = await requireAsset(release, 'rsbot-manifest.json');
+    const manifestAsset = await requireAsset(
+      release,
+      'nestly-manifest.json',
+      'rsbot-manifest.json',
+    );
     const manifestBytes = await downloadAsset(
       manifestAsset.url,
       downloadOptions(config),
     );
 
     if (config.pubkey) {
-      const signatureAsset = await requireAsset(release, 'rsbot-manifest.json.sig');
+      const signatureAsset = await requireAsset(release, `${manifestAsset.name}.sig`);
       const signature = await downloadAsset(
         signatureAsset.url,
         downloadOptions(config),
@@ -111,7 +115,7 @@ async function prepareVersion(config, log) {
       log('launcher: release manifest signature verified');
     } else {
       log(
-        'launcher: WARN RSBOT_PUBKEY is unset; the manifest is not signature-verified (SHA-256 is still enforced)',
+        'launcher: WARN NESTLY_PUBKEY is unset; the manifest is not signature-verified (SHA-256 is still enforced)',
       );
     }
 
@@ -207,7 +211,10 @@ export async function main(env = process.env, options = {}) {
       env: config.childEnv,
       // The supervisor resolves relative service binaries inside the
       // installed release, so configuration never pins a version path.
-      extraEnv: { RSBOT_BIN_DIR: path.dirname(binary) },
+      extraEnv: {
+        NESTLY_BIN_DIR: path.dirname(binary),
+        RSBOT_BIN_DIR: path.dirname(binary),
+      },
       cwd: config.stateDir,
       maxRestarts: config.restartBudget,
       write: log,

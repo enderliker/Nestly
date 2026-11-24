@@ -1,12 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/rsbot-core",
-    "crates/rsbot-ipc",
-    "crates/rsbot-sys",
-    "crates/rsbot-supervisor",
-    "crates/rsbot-edge",
-    "crates/rsbot-module-sdk",
+    "crates/nestly-core",
+    "crates/nestly-ipc",
+    "crates/nestly-sys",
+    "crates/nestly-supervisor",
+    "crates/nestly-edge",
+    "crates/nestly-module-sdk",
     "crates/modules/music",
     "crates/modules/ops",
 ]
@@ -17,7 +17,7 @@ edition = "2024"
 rust-version = "1.89"
 license = "LicenseRef-Proprietary"
 authors = ["enderliker"]
-repository = "https://github.com/enderliker/rsbot"
+repository = "https://github.com/enderliker/nestly"
 
 [workspace.dependencies]
 aho-corasick = "1"

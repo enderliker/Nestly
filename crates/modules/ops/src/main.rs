@@ -7,11 +7,11 @@
 use std::fmt::Write as _;
 use std::process::ExitCode;
 
-use rsbot_core::{
+use nestly_core::{
     CommandOptionKind, CommandOptionSpec, CommandSpec, ModuleLimits, ModuleManifest,
     ProtocolVersion,
 };
-use rsbot_module_sdk::{CommandContext, ModuleBuilder, Response};
+use nestly_module_sdk::{CommandContext, ModuleBuilder, Response};
 use serde_json::Value;
 
 const MESSAGE_LIMIT: usize = 1_900;
@@ -38,7 +38,7 @@ pub fn manifest() -> ModuleManifest {
     }
 }
 
-/// Parses `RSBOT_ADMIN_USER_IDS` (comma-separated snowflakes).
+/// Parses `NESTLY_ADMIN_USER_IDS` or `RSBOT_ADMIN_USER_IDS` (comma-separated snowflakes).
 #[must_use]
 pub fn admin_ids_from(raw: Option<&str>) -> Vec<u64> {
     raw.unwrap_or_default()
@@ -69,7 +69,7 @@ pub fn summarize_status(status: &Value) -> String {
         .filter(|service| service["state"] == "ready")
         .count();
     let mut lines = vec![format!(
-        "rsbot up {}s | gateway ready: {} | {ready}/{} services ready",
+        "nestly up {}s | gateway ready: {} | {ready}/{} services ready",
         uptime / 1000,
         if edge_ready { "yes" } else { "no" },
         services.len()
@@ -133,7 +133,12 @@ async fn status_reply(context: &CommandContext, modules_only: bool) -> Result<Re
 }
 
 async fn restart_reply(context: &CommandContext) -> Result<Response, String> {
-    let admins = admin_ids_from(std::env::var("RSBOT_ADMIN_USER_IDS").ok().as_deref());
+    let admins = admin_ids_from(
+        std::env::var("NESTLY_ADMIN_USER_IDS")
+            .or_else(|_| std::env::var("RSBOT_ADMIN_USER_IDS"))
+            .ok()
+            .as_deref(),
+    );
     if !is_authorized(context.interaction.user_id, &admins) {
         return Ok(Response::ephemeral(
             "You are not authorized to restart modules.",
@@ -178,7 +183,7 @@ async fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(source) => {
-            eprintln!("rsbot-mod-ops failed: {source}");
+            eprintln!("nestly-mod-ops failed: {source}");
             ExitCode::FAILURE
         }
     }
@@ -231,7 +236,7 @@ mod tests {
     fn summarizes_status_and_modules() {
         let status = status();
         let summary = summarize_status(&status);
-        assert!(summary.contains("rsbot up 12s"));
+        assert!(summary.contains("nestly up 12s"));
         assert!(summary.contains("gateway ready: yes"));
         assert!(summary.contains("1/3 services ready"));
         assert!(summary.contains("[music] module restarting (attempt 2)"));

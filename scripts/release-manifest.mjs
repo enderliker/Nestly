@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Copies release binaries into a dist directory with target-suffixed names and
- * writes rsbot-manifest.json plus SHA256SUMS.
+ * writes nestly-manifest.json plus SHA256SUMS.
  *
  * Usage:
  *   node scripts/release-manifest.mjs --dir target/release \
@@ -38,10 +38,10 @@ if (!/^[a-z0-9_]+-[a-z0-9_]+-linux-musl$/.test(target)) {
   throw new Error(`invalid target triple: ${target}`);
 }
 
-const BINARY = /^rsbot-(?:supervisor|edge|mod-[a-z0-9-]+)$/;
+const BINARY = /^nestly-(?:supervisor|edge|mod-[a-z0-9-]+)$/;
 const entries = await fs.readdir(sourceDir);
 const binaries = entries.filter((name) => BINARY.test(name)).sort();
-for (const required of ['rsbot-supervisor', 'rsbot-edge']) {
+for (const required of ['nestly-supervisor', 'nestly-edge']) {
   if (!binaries.includes(required)) {
     throw new Error(`missing built binary: ${required}`);
   }
@@ -69,7 +69,7 @@ const manifest = {
   },
 };
 await fs.writeFile(
-  path.join(outDir, 'rsbot-manifest.json'),
+  path.join(outDir, 'nestly-manifest.json'),
   `${JSON.stringify(manifest, null, 2)}\n`,
   { mode: 0o644 },
 );

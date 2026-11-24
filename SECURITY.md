@@ -1,6 +1,6 @@
 # Security policy
 
-rsbot handles a Discord bot token and runs several cooperating processes. The
+nestly handles a Discord bot token and runs several cooperating processes. The
 full threat model and controls are in [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Reporting

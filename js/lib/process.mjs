@@ -6,6 +6,9 @@ import { pumpStream } from './logs.mjs';
 
 const SAFE_ENV = new Set([
   'DISCORD_TOKEN',
+  'NESTLY_OPS_TOKEN',
+  'NESTLY_ALERT_CHANNEL',
+  'NESTLY_CONFIG',
   'RSBOT_OPS_TOKEN',
   'RSBOT_ALERT_CHANNEL',
   'RSBOT_CONFIG',

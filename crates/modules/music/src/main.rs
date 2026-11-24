@@ -7,12 +7,12 @@ mod source;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use player::{MusicManager, QueuedTrack};
-use rsbot_core::{
+use nestly_core::{
     CommandOptionKind, CommandOptionSpec, CommandSpec, ModuleLimits, ModuleManifest,
     ProtocolVersion,
 };
-use rsbot_module_sdk::{CommandContext, ModuleBuilder, Response};
+use nestly_module_sdk::{CommandContext, ModuleBuilder, Response};
+use player::{MusicManager, QueuedTrack};
 use source::AudioProvider;
 use tokio::sync::Mutex;
 
@@ -406,7 +406,7 @@ async fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(source) => {
-            eprintln!("rsbot-mod-music failed: {source}");
+            eprintln!("nestly-mod-music failed: {source}");
             ExitCode::FAILURE
         }
     }

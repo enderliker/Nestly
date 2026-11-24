@@ -2068,6 +2068,125 @@ dependencies = [
 ]
 
 [[package]]
+name = "nestly-core"
+version = "0.1.0"
+dependencies = [
+ "aho-corasick",
+ "regex",
+ "semver",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml",
+]
+
+[[package]]
+name = "nestly-edge"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "nestly-core",
+ "nestly-ipc",
+ "nestly-sys",
+ "rustls 0.23.46",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "twilight-gateway 0.18.0",
+ "twilight-http",
+ "twilight-model 0.18.0",
+]
+
+[[package]]
+name = "nestly-ipc"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "nestly-core",
+ "postcard",
+ "serde",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "nestly-mod-music"
+version = "0.1.0"
+dependencies = [
+ "nestly-core",
+ "nestly-module-sdk",
+ "reqwest",
+ "serde_json",
+ "songbird",
+ "symphonia",
+ "tokio",
+]
+
+[[package]]
+name = "nestly-mod-ops"
+version = "0.1.0"
+dependencies = [
+ "nestly-core",
+ "nestly-module-sdk",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "nestly-module-sdk"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "nestly-core",
+ "nestly-ipc",
+ "nestly-sys",
+ "rustls 0.23.46",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "twilight-http",
+ "twilight-model 0.18.0",
+]
+
+[[package]]
+name = "nestly-supervisor"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "clap",
+ "futures-util",
+ "nestly-core",
+ "nestly-ipc",
+ "nestly-sys",
+ "predicates",
+ "rand 0.8.8",
+ "reqwest",
+ "rustls 0.23.46",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "nestly-sys"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "tempfile",
+]
+
+[[package]]
 name = "no-std-net"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2950,125 +3069,6 @@ dependencies = [
  "crossbeam-utils",
  "portable-atomic",
  "portable-atomic-util",
-]
-
-[[package]]
-name = "rsbot-core"
-version = "0.1.0"
-dependencies = [
- "aho-corasick",
- "regex",
- "semver",
- "serde",
- "tempfile",
- "thiserror 2.0.21",
- "toml",
-]
-
-[[package]]
-name = "rsbot-edge"
-version = "0.1.0"
-dependencies = [
- "futures-util",
- "rsbot-core",
- "rsbot-ipc",
- "rsbot-sys",
- "rustls 0.23.46",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "twilight-gateway 0.18.0",
- "twilight-http",
- "twilight-model 0.18.0",
-]
-
-[[package]]
-name = "rsbot-ipc"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "futures-util",
- "postcard",
- "rsbot-core",
- "serde",
- "thiserror 2.0.21",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "rsbot-mod-music"
-version = "0.1.0"
-dependencies = [
- "reqwest",
- "rsbot-core",
- "rsbot-module-sdk",
- "serde_json",
- "songbird",
- "symphonia",
- "tokio",
-]
-
-[[package]]
-name = "rsbot-mod-ops"
-version = "0.1.0"
-dependencies = [
- "rsbot-core",
- "rsbot-module-sdk",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "rsbot-module-sdk"
-version = "0.1.0"
-dependencies = [
- "futures-util",
- "rsbot-core",
- "rsbot-ipc",
- "rsbot-sys",
- "rustls 0.23.46",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "twilight-http",
- "twilight-model 0.18.0",
-]
-
-[[package]]
-name = "rsbot-supervisor"
-version = "0.1.0"
-dependencies = [
- "assert_cmd",
- "clap",
- "futures-util",
- "predicates",
- "rand 0.8.8",
- "reqwest",
- "rsbot-core",
- "rsbot-ipc",
- "rsbot-sys",
- "rustls 0.23.46",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "rsbot-sys"
-version = "0.1.0"
-dependencies = [
- "libc",
- "tempfile",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
 # Writing a module
 
-A module is one Rust binary that links `rsbot-module-sdk`. The supervisor
+A module is one Rust binary that links `nestly-module-sdk`. The supervisor
 spawns it with an inherited IPC socket and a Discord token, and the SDK handles
 the handshake, heartbeats, dispatch, replies, and shutdown.
 
@@ -9,8 +9,8 @@ the handshake, heartbeats, dispatch, replies, and shutdown.
 ```rust
 use std::process::ExitCode;
 
-use rsbot_core::{CommandSpec, ModuleLimits, ModuleManifest, ProtocolVersion};
-use rsbot_module_sdk::{ModuleBuilder, Response};
+use nestly_core::{CommandSpec, ModuleLimits, ModuleManifest, ProtocolVersion};
+use nestly_module_sdk::{ModuleBuilder, Response};
 
 fn manifest() -> ModuleManifest {
     ModuleManifest {
@@ -37,7 +37,7 @@ async fn main() -> ExitCode {
     {
         Ok(()) => ExitCode::SUCCESS,
         Err(source) => {
-            eprintln!("rsbot-mod-ping failed: {source}");
+            eprintln!("nestly-mod-ping failed: {source}");
             ExitCode::FAILURE
         }
     }

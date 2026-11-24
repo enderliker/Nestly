@@ -1,0 +1,28 @@
+[package]
+name = "nestly-module-sdk"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+futures-util.workspace = true
+nestly-core = { path = "../nestly-core" }
+nestly-ipc = { path = "../nestly-ipc" }
+nestly-sys = { path = "../nestly-sys" }
+rustls.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+twilight-http.workspace = true
+twilight-model.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "test-util"] }
+
+[lints]
+workspace = true

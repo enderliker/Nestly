@@ -1,5 +1,5 @@
 [package]
-name = "rsbot-mod-ops"
+name = "nestly-mod-ops"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,11 +7,11 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 [[bin]]
-name = "rsbot-mod-ops"
+name = "nestly-mod-ops"
 path = "src/main.rs"
 [dependencies]
-rsbot-core = { path = "../../rsbot-core" }
-rsbot-module-sdk = { path = "../../rsbot-module-sdk" }
+nestly-core = { path = "../../nestly-core" }
+nestly-module-sdk = { path = "../../nestly-module-sdk" }
 serde_json.workspace = true
 tokio.workspace = true
 

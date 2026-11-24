@@ -9,7 +9,7 @@ import { sha256Hex } from '../lib/verify.mjs';
 
 const TOKEN = 'discord-token-0123456789abcdef';
 
-async function temporaryDirectory(prefix = 'rsbot-start-') {
+async function temporaryDirectory(prefix = 'nestly-start-') {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
@@ -18,7 +18,7 @@ async function installedLauncher({ body = '#!/bin/sh\necho supervisor-boot ok\ne
   const version = '0.1.0';
   const versionDir = path.join(installDir, version);
   await fs.mkdir(versionDir, { recursive: true, mode: 0o700 });
-  const file = 'rsbot-supervisor';
+  const file = 'nestly-supervisor';
   const binary = path.join(versionDir, file);
   await fs.writeFile(binary, body, { mode: 0o755 });
   const bytes = Buffer.from(body);
@@ -26,7 +26,7 @@ async function installedLauncher({ body = '#!/bin/sh\necho supervisor-boot ok\ne
     version,
     assets: [
       {
-        name: 'rsbot-supervisor',
+        name: 'nestly-supervisor',
         file,
         sha256: tamper ? '0'.repeat(64) : sha256Hex(bytes),
         size: bytes.length,
@@ -45,9 +45,9 @@ async function runMain(installDir, overrides = {}) {
   const result = await main(
     {
       DISCORD_TOKEN: TOKEN,
-      RSBOT_INSTALL_DIR: installDir,
-      RSBOT_STATE_DIR: stateDir,
-      RSBOT_SKIP_UPDATE: '1',
+      NESTLY_INSTALL_DIR: installDir,
+      NESTLY_STATE_DIR: stateDir,
+      NESTLY_SKIP_UPDATE: '1',
       ...overrides,
     },
     {
@@ -61,7 +61,7 @@ async function runMain(installDir, overrides = {}) {
 
 test('verifies the installed binary and streams supervisor logs', async () => {
   const { installDir } = await installedLauncher();
-  const { result, lines } = await runMain(installDir, { RSBOT_RESTART_BUDGET: '0' });
+  const { result, lines } = await runMain(installDir, { NESTLY_RESTART_BUDGET: '0' });
   assert.equal(result.code, 0, lines.join('\n'));
   assert.ok(
     lines.some((line) => line === '[supervisor] supervisor-boot ok'),
@@ -88,7 +88,7 @@ test('propagates a supervisor exit code when the restart budget is exhausted', a
   const { installDir } = await installedLauncher({
     body: '#!/bin/sh\nexit 9\n',
   });
-  const { result } = await runMain(installDir, { RSBOT_RESTART_BUDGET: '1' });
+  const { result } = await runMain(installDir, { NESTLY_RESTART_BUDGET: '1' });
   assert.equal(result.code, 9);
 });
 
@@ -101,9 +101,9 @@ test('rejects the launcher when another instance holds the lock', async () => {
   const result = await main(
     {
       DISCORD_TOKEN: TOKEN,
-      RSBOT_INSTALL_DIR: installDir,
-      RSBOT_STATE_DIR: stateDir,
-      RSBOT_SKIP_UPDATE: '1',
+      NESTLY_INSTALL_DIR: installDir,
+      NESTLY_STATE_DIR: stateDir,
+      NESTLY_SKIP_UPDATE: '1',
     },
     { handleSignals: false, log: () => {}, error: (line) => errors.push(line) },
   );

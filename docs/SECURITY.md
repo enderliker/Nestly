@@ -19,7 +19,7 @@ file, argv, a core dump, or another module.
 | Admin command abuse | `/ops-restart` requires a user in `discord.admin_user_ids`; the module re-checks server-side |
 | Oversized Discord input | Interaction token, custom id, command name, and data length validated before routing; JSON capped at 512 KiB |
 | Supply chain | SHA-256 verification of every asset; Ed25519 manifest signature when a pinned key is configured; HTTPS-only downloads; host allowlist across redirects; repository allowlist; size caps; atomic install with mode 0700/0755 |
-| Path traversal in a release | Asset names must be flat `rsbot-*` names; install paths are resolved and prefix-checked; version strings are validated |
+| Path traversal in a release | Asset names must be flat `nestly-*` names; install paths are resolved and prefix-checked; version strings are validated |
 | Concurrent launchers | Atomic lock file with live-pid detection and stale-lock recovery |
 | Log flooding | 8 KiB line cap, per-module ring buffer, bounded IPC queues |
 
@@ -39,17 +39,17 @@ Every child is configured with:
 - `stdin` from `/dev/null`, `stdout`/`stderr` piped to the supervisor.
 - Rejection of symlinked or non-executable binaries.
 
-The only crate allowed to contain `unsafe` is `rsbot-sys`; every block is a
+The only crate allowed to contain `unsafe` is `nestly-sys`; every block is a
 small audited libc wrapper.
 
 ## Secrets
 
 - `DISCORD_TOKEN` is required; `DISCORD_TOKEN_<MODULE>` optionally overrides a
   module token.
-- `RSBOT_OPS_TOKEN` optionally supplies a dedicated alert token.
-- `RSBOT_ALERT_CHANNEL` optionally supplies the alert channel.
+- `NESTLY_OPS_TOKEN` (or legacy `RSBOT_OPS_TOKEN`) optionally supplies a dedicated alert token.
+- `NESTLY_ALERT_CHANNEL` (or legacy `RSBOT_ALERT_CHANNEL`) optionally supplies the alert channel.
 - Tokens are redacted by exact value before reaching any sink.
-- The launcher keeps `RSBOT_GITHUB_TOKEN` to itself; it is not part of the
+- The launcher keeps `NESTLY_GITHUB_TOKEN` to itself; it is not part of the
   child environment.
 
 ## Release verification
@@ -57,7 +57,7 @@ small audited libc wrapper.
 1. The repository must be allowlisted; release tags must match a semver shape.
 2. The manifest is downloaded over HTTPS from an allowlisted host, following
    at most five redirects that are re-validated at every hop.
-3. When `RSBOT_PUBKEY` is set, the detached Ed25519 signature over the exact
+3. When `NESTLY_PUBKEY` (or `RSBOT_PUBKEY`) is set, the detached Ed25519 signature over the exact
    manifest bytes is verified; a bad signature aborts the install.
 4. Manifest schema, version, target, asset names, sizes, and SHA-256 digests
    are validated before any binary is downloaded.

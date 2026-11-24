@@ -7,16 +7,19 @@ export class ConfigError extends Error {
   }
 }
 
-export const DEFAULT_REPO = 'enderliker/rsbot';
-export const DEFAULT_INSTALL_DIR = '/home/container/rsbotbins';
-export const DEFAULT_STATE_DIR = '/home/container/rsbot-state';
+export const DEFAULT_REPO = 'enderliker/nestly';
+export const DEFAULT_INSTALL_DIR = '/home/container/nestlybins';
+export const DEFAULT_STATE_DIR = '/home/container/nestly-state';
 
 /** Repositories this launcher is allowed to download from. */
-export const ALLOWED_REPOS = new Set([DEFAULT_REPO]);
+export const ALLOWED_REPOS = new Set([DEFAULT_REPO, 'enderliker/rsbot']);
 
 const RELEASE_TAG = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/;
 const MODULE_TOKEN = /^DISCORD_TOKEN_[A-Z0-9_]+$/;
 const PASSTHROUGH = new Set([
+  'NESTLY_OPS_TOKEN',
+  'NESTLY_ALERT_CHANNEL',
+  'NESTLY_CONFIG',
   'RSBOT_OPS_TOKEN',
   'RSBOT_ALERT_CHANNEL',
   'RSBOT_CONFIG',
@@ -72,30 +75,36 @@ function releaseTag(value, name) {
 export function loadConfig(env = process.env, options = {}) {
   const { requireToken = true } = options;
 
-  const repo = (env.RSBOT_REPO ?? DEFAULT_REPO).trim();
+  const repo = (env.NESTLY_REPO ?? env.RSBOT_REPO ?? DEFAULT_REPO).trim();
   if (!ALLOWED_REPOS.has(repo)) {
     throw new ConfigError(
       `repository ${repo} is not in the launcher allowlist (${[...ALLOWED_REPOS].join(', ')})`,
     );
   }
 
-  const releaseRaw = (env.RSBOT_RELEASE ?? 'latest').trim();
+  const releaseRaw = (env.NESTLY_RELEASE ?? env.RSBOT_RELEASE ?? 'latest').trim();
   const release =
-    releaseRaw === 'latest' ? 'latest' : releaseTag(releaseRaw, 'RSBOT_RELEASE');
+    releaseRaw === 'latest'
+      ? 'latest'
+      : releaseTag(releaseRaw, env.NESTLY_RELEASE ? 'NESTLY_RELEASE' : 'RSBOT_RELEASE');
 
-  const pinVersion = env.RSBOT_PIN_VERSION
-    ? releaseTag(env.RSBOT_PIN_VERSION, 'RSBOT_PIN_VERSION')
+  const rawPin = env.NESTLY_PIN_VERSION ?? env.RSBOT_PIN_VERSION;
+  const pinVersion = rawPin
+    ? releaseTag(rawPin, env.NESTLY_PIN_VERSION ? 'NESTLY_PIN_VERSION' : 'RSBOT_PIN_VERSION')
     : null;
 
   const installDir = requireAbsolute(
-    env.RSBOT_INSTALL_DIR ?? DEFAULT_INSTALL_DIR,
-    'RSBOT_INSTALL_DIR',
+    env.NESTLY_INSTALL_DIR ?? env.RSBOT_INSTALL_DIR ?? DEFAULT_INSTALL_DIR,
+    env.NESTLY_INSTALL_DIR ? 'NESTLY_INSTALL_DIR' : (env.RSBOT_INSTALL_DIR ? 'RSBOT_INSTALL_DIR' : 'NESTLY_INSTALL_DIR'),
   );
   const stateDir = requireAbsolute(
-    env.RSBOT_STATE_DIR ?? DEFAULT_STATE_DIR,
-    'RSBOT_STATE_DIR',
+    env.NESTLY_STATE_DIR ?? env.RSBOT_STATE_DIR ?? DEFAULT_STATE_DIR,
+    env.NESTLY_STATE_DIR ? 'NESTLY_STATE_DIR' : (env.RSBOT_STATE_DIR ? 'RSBOT_STATE_DIR' : 'NESTLY_STATE_DIR'),
   );
-  const logDir = requireAbsolute(env.RSBOT_LOG_DIR ?? path.join(stateDir, 'logs'), 'RSBOT_LOG_DIR');
+  const logDir = requireAbsolute(
+    env.NESTLY_LOG_DIR ?? env.RSBOT_LOG_DIR ?? path.join(stateDir, 'logs'),
+    env.NESTLY_LOG_DIR ? 'NESTLY_LOG_DIR' : (env.RSBOT_LOG_DIR ? 'RSBOT_LOG_DIR' : 'NESTLY_LOG_DIR'),
+  );
 
   const token = env.DISCORD_TOKEN;
   if (requireToken && (typeof token !== 'string' || token.trim().length === 0)) {
@@ -117,6 +126,11 @@ export function loadConfig(env = process.env, options = {}) {
     }
   }
 
+  const configPathRaw = env.NESTLY_CONFIG ?? env.RSBOT_CONFIG;
+  const configPath = configPathRaw
+    ? requireAbsolute(configPathRaw, env.NESTLY_CONFIG ? 'NESTLY_CONFIG' : 'RSBOT_CONFIG')
+    : null;
+
   return {
     repo,
     release,
@@ -124,25 +138,39 @@ export function loadConfig(env = process.env, options = {}) {
     installDir,
     stateDir,
     logDir,
-    githubToken: env.RSBOT_GITHUB_TOKEN ?? null,
-    pubkey: env.RSBOT_PUBKEY ?? null,
-    configPath: env.RSBOT_CONFIG ? requireAbsolute(env.RSBOT_CONFIG, 'RSBOT_CONFIG') : null,
-    httpTimeoutMs: integer(env.RSBOT_HTTP_TIMEOUT_MS, 'RSBOT_HTTP_TIMEOUT_MS', {
-      min: 1_000,
-      max: 300_000,
-      fallback: DEFAULTS.httpTimeoutMs,
-    }),
-    maxDownloadBytes: integer(env.RSBOT_MAX_DOWNLOAD_BYTES, 'RSBOT_MAX_DOWNLOAD_BYTES', {
-      min: 1,
-      max: 512 * 1024 * 1024,
-      fallback: DEFAULTS.maxDownloadBytes,
-    }),
-    restartBudget: integer(env.RSBOT_RESTART_BUDGET, 'RSBOT_RESTART_BUDGET', {
-      min: 0,
-      max: 10,
-      fallback: DEFAULTS.restartBudget,
-    }),
-    skipUpdate: env.RSBOT_SKIP_UPDATE === '1' || env.RSBOT_SKIP_UPDATE === 'true',
+    githubToken: env.NESTLY_GITHUB_TOKEN ?? env.RSBOT_GITHUB_TOKEN ?? null,
+    pubkey: env.NESTLY_PUBKEY ?? env.RSBOT_PUBKEY ?? null,
+    configPath,
+    httpTimeoutMs: integer(
+      env.NESTLY_HTTP_TIMEOUT_MS ?? env.RSBOT_HTTP_TIMEOUT_MS,
+      env.NESTLY_HTTP_TIMEOUT_MS ? 'NESTLY_HTTP_TIMEOUT_MS' : 'RSBOT_HTTP_TIMEOUT_MS',
+      {
+        min: 1_000,
+        max: 300_000,
+        fallback: DEFAULTS.httpTimeoutMs,
+      },
+    ),
+    maxDownloadBytes: integer(
+      env.NESTLY_MAX_DOWNLOAD_BYTES ?? env.RSBOT_MAX_DOWNLOAD_BYTES,
+      env.NESTLY_MAX_DOWNLOAD_BYTES ? 'NESTLY_MAX_DOWNLOAD_BYTES' : 'RSBOT_MAX_DOWNLOAD_BYTES',
+      {
+        min: 1,
+        max: 512 * 1024 * 1024,
+        fallback: DEFAULTS.maxDownloadBytes,
+      },
+    ),
+    restartBudget: integer(
+      env.NESTLY_RESTART_BUDGET ?? env.RSBOT_RESTART_BUDGET,
+      env.NESTLY_RESTART_BUDGET ? 'NESTLY_RESTART_BUDGET' : 'RSBOT_RESTART_BUDGET',
+      {
+        min: 0,
+        max: 10,
+        fallback: DEFAULTS.restartBudget,
+      },
+    ),
+    skipUpdate:
+      (env.NESTLY_SKIP_UPDATE ?? env.RSBOT_SKIP_UPDATE) === '1' ||
+      (env.NESTLY_SKIP_UPDATE ?? env.RSBOT_SKIP_UPDATE) === 'true',
     childEnv,
   };
 }

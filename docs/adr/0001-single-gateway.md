@@ -12,7 +12,7 @@ Discord rejects them.
 
 ## Decision
 
-`rsbot-edge` owns the only gateway connection. Modules own `twilight-http`
+`nestly-edge` owns the only gateway connection. Modules own `twilight-http`
 clients with the same application token, independent connection pools, and
 independent rate-limit buckets. The edge converts interactions into a compact
 internal payload and the supervisor routes them to the owning module.

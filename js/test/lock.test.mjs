@@ -7,7 +7,7 @@ import test from 'node:test';
 import { LockError, acquireLock } from '../lib/lock.mjs';
 
 async function temporaryDirectory() {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'rsbot-lock-'));
+  return fs.mkdtemp(path.join(os.tmpdir(), 'nestly-lock-'));
 }
 
 test('acquires, blocks a second launcher, and releases', async () => {

@@ -37,6 +37,11 @@ test('compares hashes and rejects malformed digests', () => {
 
 test('accepts only release asset names', () => {
   for (const name of [
+    'nestly-supervisor-x86_64-unknown-linux-musl',
+    'nestly-edge-aarch64-unknown-linux-musl',
+    'nestly-mod-music-x86_64-unknown-linux-musl',
+    'nestly-manifest.json',
+    'nestly-manifest.json.sig',
     'rsbot-supervisor-x86_64-unknown-linux-musl',
     'rsbot-edge-aarch64-unknown-linux-musl',
     'rsbot-mod-music-x86_64-unknown-linux-musl',
@@ -46,13 +51,16 @@ test('accepts only release asset names', () => {
     assert.equal(assertAssetName(name), name);
   }
   for (const name of [
+    '../nestly-supervisor',
+    'nestly-supervisor/../escape',
     '../rsbot-supervisor',
     'rsbot-supervisor/../escape',
     '/etc/passwd',
+    'nestly-',
     'rsbot-',
     'other-binary',
-    'rsbot-supervisor\u0000',
-    'rsbot-supervisor\\..\\x',
+    'nestly-supervisor\u0000',
+    'nestly-supervisor\\..\\x',
   ]) {
     assert.throws(() => assertAssetName(name), VerificationError, name);
   }

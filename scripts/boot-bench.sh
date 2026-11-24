@@ -4,7 +4,7 @@ set -euo pipefail
 
 iterations="${1:-5}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-profile_dir="${RSBOT_PROFILE_DIR:-$root/target/release}"
+profile_dir="${NESTLY_PROFILE_DIR:-${RSBOT_PROFILE_DIR:-$root/target/release}}"
 
 cd "$root"
 cargo build --release --workspace --quiet
@@ -12,15 +12,16 @@ cargo build --release --workspace --quiet
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-sed "s|/home/container/rsbot-state|$work/state|g" \
-  config/rsbot.example.toml > "$work/rsbot.toml"
+sed "s|/home/container/nestly-state|$work/state|g" \
+  config/nestly.example.toml > "$work/nestly.toml"
 
+export NESTLY_BIN_DIR="$profile_dir"
 export RSBOT_BIN_DIR="$profile_dir"
 export DISCORD_TOKEN="${DISCORD_TOKEN:-boot-probe-token-0123456789}"
 
 max=0
 for run in $(seq 1 "$iterations"); do
-  output="$("$profile_dir/rsbot-supervisor" --config "$work/rsbot.toml" --boot-probe)"
+  output="$("$profile_dir/nestly-supervisor" --config "$work/nestly.toml" --boot-probe)"
   report="$(printf '%s\n' "$output" | grep '^BOOT_PROBE ' | sed 's/^BOOT_PROBE //')"
   if [[ -z "$report" ]]; then
     printf 'run %s produced no boot report:\n%s\n' "$run" "$output" >&2

@@ -5,9 +5,9 @@
 | Process | Responsibility |
 |---|---|
 | `start.mjs` (Node 24) | Resolve, verify, install release binaries; spawn the supervisor; forward signals; prefix and stream logs; restart the supervisor up to a bounded budget |
-| `rsbot-supervisor` | Config, registry, spawn, health, restart policy, IPC broker, log multiplexer, redaction, alerts, status file |
-| `rsbot-edge` | The only gateway connection; interaction conversion; guild allowlist; command registration; fallback replies |
-| `rsbot-mod-*` | One feature binary. Own handlers, state, and REST client |
+| `nestly-supervisor` | Config, registry, spawn, health, restart policy, IPC broker, log multiplexer, redaction, alerts, status file |
+| `nestly-edge` | The only gateway connection; interaction conversion; guild allowlist; command registration; fallback replies |
+| `nestly-mod-*` | One feature binary. Own handlers, state, and REST client |
 
 The launcher spawns only the supervisor. The supervisor spawns the edge and
 every enabled module as separate OS processes. Each child receives the
@@ -116,7 +116,7 @@ no network calls: token validation, gateway connect, and command registration
 happen after `Ready`. The supervisor spawns all children concurrently and
 uses a single-threaded runtime; the edge uses two worker threads.
 
-`rsbot-supervisor --boot-probe` prints:
+`nestly-supervisor --boot-probe` prints:
 
 ```json
 {"ok":true,"boot_ms":123,"budget_ms":1000,"services":[...]}
@@ -133,5 +133,5 @@ uses a single-threaded runtime; the edge uses two worker threads.
 - The supervisor runs on a current-thread runtime. It is event-loop bound, and
   this keeps boot and memory lower; the plan's two-worker suggestion is an
   optimization only.
-- The launcher installs versioned directories and passes `RSBOT_BIN_DIR`; the
+- The launcher installs versioned directories and passes `NESTLY_BIN_DIR` (or `RSBOT_BIN_DIR`); the
   configuration names services by bare file name and never pins a version.

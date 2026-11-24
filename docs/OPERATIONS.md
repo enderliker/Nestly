@@ -3,17 +3,17 @@
 ## Container layout
 
 ```
-/home/container/rsbot/js/                 launcher (Node 24)
-/home/container/rsbot.toml                configuration
-/home/container/rsbotbins/<version>/      verified release binaries
-/home/container/rsbotbins/current         version pointer (regular file)
-/home/container/rsbot-state/              launcher state, lock, logs
+/home/container/nestly/js/                 launcher (Node 24)
+/home/container/nestly.toml                configuration
+/home/container/nestlybins/<version>/      verified release binaries
+/home/container/nestlybins/current         version pointer (regular file)
+/home/container/nestly-state/              launcher state, lock, logs
 ```
 
 Start command:
 
 ```bash
-node /home/container/rsbot/js/start.mjs
+node /home/container/nestly/js/start.mjs
 ```
 
 The launcher takes an exclusive lock, reuses a verified install when possible,
@@ -26,21 +26,21 @@ already carry their module field.
 | Variable | Required | Notes |
 |---|---|---|
 | `DISCORD_TOKEN` | yes | Bot token |
-| `RSBOT_CONFIG` | recommended | Absolute path to the TOML |
-| `RSBOT_ALERT_CHANNEL` | optional | Overrides `notifications.channel_id` |
-| `RSBOT_OPS_TOKEN` | optional | Dedicated alert token |
-| `RSBOT_PUBKEY` | recommended | Pinned Ed25519 public key |
-| `RSBOT_GITHUB_TOKEN` | private repo | Read-only release access |
+| `NESTLY_CONFIG` | recommended | Absolute path to the TOML (legacy `RSBOT_CONFIG` supported) |
+| `NESTLY_ALERT_CHANNEL` | optional | Overrides `notifications.channel_id` (legacy `RSBOT_ALERT_CHANNEL` supported) |
+| `NESTLY_OPS_TOKEN` | optional | Dedicated alert token (legacy `RSBOT_OPS_TOKEN` supported) |
+| `NESTLY_PUBKEY` | recommended | Pinned Ed25519 public key (legacy `RSBOT_PUBKEY` supported) |
+| `NESTLY_GITHUB_TOKEN` | private repo | Read-only release access |
 
 ## Deploy and upgrade
 
 1. Publish a `v*` tag. Releases contain the manifest, signature, checksums, and
    target-suffixed binaries.
-2. Restart the container. The launcher resolves `latest` (or `RSBOT_RELEASE`),
+2. Restart the container. The launcher resolves `latest` (or `NESTLY_RELEASE`),
    verifies, installs a new version directory, and switches `current`.
 3. A failed download keeps the previous verified version running with a WARN.
-4. Rollback: set `RSBOT_RELEASE` to the previous tag, or run with
-   `RSBOT_SKIP_UPDATE=1` while the previous version is still installed. Only
+4. Rollback: set `NESTLY_RELEASE` to the previous tag, or run with
+   `NESTLY_SKIP_UPDATE=1` while the previous version is still installed. Only
    the current and previous versions are retained.
 
 ## Alerting
@@ -80,8 +80,8 @@ for disabled modules.
 scripts/boot-bench.sh 50
 ```
 
-The script builds release binaries, points `RSBOT_BIN_DIR` at them, and runs
-`rsbot-supervisor --boot-probe` repeatedly. It fails if any run exceeds
+The script builds release binaries, points `NESTLY_BIN_DIR` at them, and runs
+`nestly-supervisor --boot-probe` repeatedly. It fails if any run exceeds
 1,000 ms. Network access is not part of readiness.
 
 ## Failure handling

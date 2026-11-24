@@ -13,7 +13,7 @@ export class VerificationError extends Error {
 }
 
 const SHA256_HEX = /^[0-9a-fA-F]{64}$/;
-const ASSET_NAME = /^rsbot-[a-z0-9][a-z0-9._-]*$/;
+const ASSET_NAME = /^(?:nestly|rsbot)-[a-z0-9][a-z0-9._-]*$/;
 const ED25519_SIGNATURE_BYTES = 64;
 
 /** Hex SHA-256 of a buffer. */
@@ -54,7 +54,7 @@ export function assertAssetName(name) {
   ) {
     throw new VerificationError(`invalid release asset name: ${name}`);
   }
-  if (!ASSET_NAME.test(name) || name === 'rsbot-') {
+  if (!ASSET_NAME.test(name) || name === 'nestly-' || name === 'rsbot-') {
     throw new VerificationError(`invalid release asset name: ${name}`);
   }
   return name;

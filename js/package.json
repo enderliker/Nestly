@@ -1,9 +1,9 @@
 {
-  "name": "rsbot-launcher",
+  "name": "nestly-launcher",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Zero-dependency Node 24 launcher for rsbot release binaries",
+  "description": "Zero-dependency Node 24 launcher for nestly release binaries",
   "engines": {
     "node": ">=24"
   },

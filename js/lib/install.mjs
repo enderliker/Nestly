@@ -146,9 +146,11 @@ export async function verifyInstalled({ installDir, version }) {
 /** Returns the installed supervisor binary after validating its path. */
 export async function currentSupervisor({ installDir, version }) {
   const { versionDir, metadata } = await readMetadata(installDir, version);
-  const supervisor = metadata.assets.find((asset) => asset.name === 'rsbot-supervisor');
+  const supervisor =
+    metadata.assets.find((asset) => asset.name === 'nestly-supervisor') ??
+    metadata.assets.find((asset) => asset.name === 'rsbot-supervisor');
   if (!supervisor) {
-    throw new InstallError('the installed metadata has no rsbot-supervisor asset');
+    throw new InstallError('the installed metadata has no nestly-supervisor asset');
   }
   const binary = safeJoin(versionDir, supervisor.name);
   const stat = await fs.lstat(binary);

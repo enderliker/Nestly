@@ -30,13 +30,13 @@ function releasePayload(base) {
     tag_name: 'v0.1.0',
     assets: [
       {
-        name: 'rsbot-manifest.json',
+        name: 'nestly-manifest.json',
         size: 10,
         browser_download_url: `${base}/assets/manifest`,
         digest: `sha256:${'a'.repeat(64)}`,
       },
       {
-        name: 'rsbot-manifest.json.sig',
+        name: 'nestly-manifest.json.sig',
         size: 64,
         browser_download_url: `${base}/assets/signature`,
       },
@@ -52,14 +52,14 @@ const MANIFEST = {
     'x86_64-unknown-linux-musl': {
       assets: [
         {
-          name: 'rsbot-supervisor',
-          file: 'rsbot-supervisor-x86_64-unknown-linux-musl',
+          name: 'nestly-supervisor',
+          file: 'nestly-supervisor-x86_64-unknown-linux-musl',
           sha256: 'b'.repeat(64),
           size: 1024,
         },
         {
-          name: 'rsbot-edge',
-          file: 'rsbot-edge-x86_64-unknown-linux-musl',
+          name: 'nestly-edge',
+          file: 'nestly-edge-x86_64-unknown-linux-musl',
           sha256: 'c'.repeat(64),
           size: 2048,
         },
@@ -70,13 +70,13 @@ const MANIFEST = {
 
 test('resolves a release and links its manifest assets', async () => {
   const server = await startServer((request, response) => {
-    assert.equal(request.url, '/repos/enderliker/rsbot/releases/latest');
+    assert.equal(request.url, '/repos/enderliker/nestly/releases/latest');
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify(releasePayload(server.url)));
   });
   try {
     const release = await resolveRelease(
-      { repo: 'enderliker/rsbot', release: 'latest', githubToken: null, httpTimeoutMs: 2_000 },
+      { repo: 'enderliker/nestly', release: 'latest', githubToken: null, httpTimeoutMs: 2_000 },
       {
         apiBase: server.url,
         allowedHosts: new Set([server.host]),
@@ -162,7 +162,7 @@ test('rejects plain HTTP and non-allowlisted hosts in production', () => {
   assert.throws(() => assertAllowedUrl('file:///etc/passwd', DEFAULT_ALLOWED_HOSTS), GitHubError);
   assert.throws(() => assertAllowedUrl('https://user:pass@github.com/x', DEFAULT_ALLOWED_HOSTS), GitHubError);
   assert.equal(
-    assertAllowedUrl('https://github.com/enderliker/rsbot/releases', DEFAULT_ALLOWED_HOSTS).host,
+    assertAllowedUrl('https://github.com/enderliker/nestly/releases', DEFAULT_ALLOWED_HOSTS).host,
     'github.com',
   );
 });
@@ -188,7 +188,7 @@ test('validates the manifest schema strictly', () => {
           },
         },
       },
-      /rsbot-edge/,
+      /nestly-edge/,
     ],
     [
       {

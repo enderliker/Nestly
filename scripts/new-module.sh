@@ -9,7 +9,7 @@ if [[ ! "$name" =~ ^[a-z][a-z0-9-]{0,31}$ ]]; then
 fi
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-crate_name="rsbot-mod-$name"
+crate_name="nestly-mod-$name"
 dir="$root/crates/modules/$name"
 
 if [[ -e "$dir" ]]; then
@@ -34,8 +34,8 @@ name = "$crate_name"
 path = "src/main.rs"
 
 [dependencies]
-rsbot-core = { path = "../../rsbot-core" }
-rsbot-module-sdk = { path = "../../rsbot-module-sdk" }
+nestly-core = { path = "../../nestly-core" }
+nestly-module-sdk = { path = "../../nestly-module-sdk" }
 serde_json.workspace = true
 tokio.workspace = true
 
@@ -49,8 +49,8 @@ cat > "$dir/src/main.rs" <<EOF
 
 use std::process::ExitCode;
 
-use rsbot_core::{CommandSpec, ModuleLimits, ModuleManifest, ProtocolVersion};
-use rsbot_module_sdk::{ModuleBuilder, Response};
+use nestly_core::{CommandSpec, ModuleLimits, ModuleManifest, ProtocolVersion};
+use nestly_module_sdk::{ModuleBuilder, Response};
 
 /// Commands are valid Discord names (no dots).
 #[must_use]

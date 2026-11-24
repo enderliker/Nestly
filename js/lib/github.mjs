@@ -16,13 +16,13 @@ export const DEFAULT_ALLOWED_HOSTS = new Set([
 ]);
 
 const RELEASE_TAG = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/;
-const BINARY_NAME = /^rsbot-(?:supervisor|edge|mod-[a-z0-9-]+)$/;
+const BINARY_NAME = /^(?:nestly|rsbot)-(?:supervisor|edge|mod-[a-z0-9-]+)$/;
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 
 function headersFor(token) {
   const headers = {
     accept: 'application/vnd.github+json',
-    'user-agent': 'rsbot-launcher/0.1',
+    'user-agent': 'nestly-launcher/0.1',
   };
   if (token) {
     headers.authorization = `Bearer ${token}`;
@@ -124,9 +124,14 @@ export async function resolveRelease(config, options = {}) {
   return {
     tag,
     assets,
-    manifest: assets.find((asset) => asset.name === 'rsbot-manifest.json') ?? null,
+    manifest:
+      assets.find((asset) => asset.name === 'nestly-manifest.json') ??
+      assets.find((asset) => asset.name === 'rsbot-manifest.json') ??
+      null,
     signature:
-      assets.find((asset) => asset.name === 'rsbot-manifest.json.sig') ?? null,
+      assets.find((asset) => asset.name === 'nestly-manifest.json.sig') ??
+      assets.find((asset) => asset.name === 'rsbot-manifest.json.sig') ??
+      null,
   };
 }
 
@@ -268,8 +273,8 @@ export function validateManifest(manifest, { target, maxBytes }) {
   }
 
   const names = new Set(assets.map((asset) => asset.name));
-  for (const required of ['rsbot-supervisor', 'rsbot-edge']) {
-    if (!names.has(required)) {
+  for (const required of ['supervisor', 'edge']) {
+    if (!names.has(`nestly-${required}`) && !names.has(`rsbot-${required}`)) {
       throw new GitHubError(`the manifest is missing the ${required} asset`);
     }
   }

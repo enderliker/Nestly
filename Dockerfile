@@ -14,18 +14,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd --create-home --uid 1000 container
 WORKDIR /home/container
 
-ENV RSBOT_INSTALL_DIR=/home/container/rsbotbins \
-    RSBOT_STATE_DIR=/home/container/rsbot-state \
-    RSBOT_CONFIG=/home/container/rsbot.toml \
+ENV NESTLY_INSTALL_DIR=/home/container/nestlybins \
+    NESTLY_STATE_DIR=/home/container/nestly-state \
+    NESTLY_CONFIG=/home/container/nestly.toml \
+    RSBOT_INSTALL_DIR=/home/container/nestlybins \
+    RSBOT_STATE_DIR=/home/container/nestly-state \
+    RSBOT_CONFIG=/home/container/nestly.toml \
     NODE_ENV=production
 
-COPY js /home/container/rsbot/js
-COPY config/rsbot.example.toml /home/container/rsbot.toml
+COPY js /home/container/nestly/js
+COPY config/nestly.example.toml /home/container/nestly.toml
 
-RUN mkdir -p /home/container/rsbot-state /home/container/rsbotbins \
+RUN mkdir -p /home/container/nestly-state /home/container/nestlybins \
     && chown -R container:container /home/container
 
 USER container
 
 # The launcher downloads static musl binaries and verifies them before spawn.
-ENTRYPOINT ["node", "/home/container/rsbot/js/start.mjs"]
+ENTRYPOINT ["node", "/home/container/nestly/js/start.mjs"]

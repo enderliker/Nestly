@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * Signs rsbot-manifest.json with an Ed25519 key.
+ * Signs nestly-manifest.json with an Ed25519 key.
  *
- * RSBOT_SIGNING_KEY must hold a base64-encoded PKCS#8 DER private key. When it
- * is unset the script prints a notice and exits successfully, so unsigned
- * development releases still build.
+ * NESTLY_SIGNING_KEY (or RSBOT_SIGNING_KEY) must hold a base64-encoded PKCS#8
+ * DER private key. When it is unset the script prints a notice and exits
+ * successfully, so unsigned development releases still build.
  *
- * Usage: node scripts/sign-manifest.mjs dist/rsbot-manifest.json
+ * Usage: node scripts/sign-manifest.mjs dist/nestly-manifest.json
  */
 
 import { createPrivateKey, sign } from 'node:crypto';
@@ -17,9 +17,9 @@ if (!manifestPath) {
   throw new Error('usage: sign-manifest.mjs <manifest path>');
 }
 
-const encoded = process.env.RSBOT_SIGNING_KEY;
+const encoded = process.env.NESTLY_SIGNING_KEY ?? process.env.RSBOT_SIGNING_KEY;
 if (!encoded) {
-  console.log('RSBOT_SIGNING_KEY is unset; the manifest was not signed');
+  console.log('NESTLY_SIGNING_KEY is unset; the manifest was not signed');
   process.exit(0);
 }
 

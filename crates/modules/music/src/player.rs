@@ -3,7 +3,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::num::NonZeroU64;
 
-use rsbot_module_sdk::{VoiceServerPayload, VoiceStatePayload};
+use nestly_module_sdk::{VoiceServerPayload, VoiceStatePayload};
 use songbird::driver::Driver;
 use songbird::input::YoutubeDl;
 use songbird::tracks::TrackHandle;

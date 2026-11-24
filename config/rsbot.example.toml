@@ -48,8 +48,15 @@ token_env = "DISCORD_TOKEN"
 id = "music"
 binary = "rsbot-mod-music"
 token_env = "DISCORD_TOKEN"
-commands = ["music-play", "music-skip"]
-events = ["interaction_create"]
+commands = [
+  "music-play",
+  "music-skip",
+  "music-pause",
+  "music-stop",
+  "music-nowplaying",
+  "music-queue",
+]
+events = ["interaction_create", "voice_state_update"]
 requires = ["discord.rest"]
 exclusive = ["voice.session"]
 max_rss_mb = 192

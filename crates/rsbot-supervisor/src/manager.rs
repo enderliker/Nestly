@@ -432,9 +432,16 @@ impl Supervisor {
                     self.send_status_to_edge(id);
                 }
             }
-            Envelope::Event { event, .. } => {
-                let GatewayEvent::Interaction(interaction) = event;
-                self.route_interaction(*interaction).await;
+            Envelope::Event { seq, event } => match event {
+                GatewayEvent::Interaction(interaction) => {
+                    self.route_interaction(*interaction).await;
+                }
+                voice @ (GatewayEvent::VoiceState(_) | GatewayEvent::VoiceServer(_)) => {
+                    self.route_voice_event(seq, voice).await;
+                }
+            },
+            Envelope::VoiceGatewaySend { .. } => {
+                self.send_to("edge", envelope).await;
             }
             Envelope::CommandAck { correlation, acked } => {
                 if let Some(pending) = self.pending.get_mut(&correlation)
@@ -619,6 +626,19 @@ impl Supervisor {
             self.pending.remove(&correlation);
             self.send_fallback(&owner, &interaction, FallbackReason::Crashed, false)
                 .await;
+        }
+    }
+
+    async fn route_voice_event(&mut self, seq: u64, event: GatewayEvent) {
+        let voice_module = self.specs.values().find_map(|spec| {
+            if spec.manifest.exclusive.iter().any(|c| c == "voice.session") {
+                Some(spec.id.clone())
+            } else {
+                None
+            }
+        });
+        if let Some(target) = voice_module {
+            self.send_to(&target, Envelope::Event { seq, event }).await;
         }
     }
 

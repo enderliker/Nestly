@@ -10,9 +10,12 @@ repository.workspace = true
 name = "rsbot-mod-music"
 path = "src/main.rs"
 [dependencies]
+reqwest = { workspace = true }
 rsbot-core = { path = "../../rsbot-core" }
 rsbot-module-sdk = { path = "../../rsbot-module-sdk" }
 serde_json.workspace = true
+songbird = { version = "0.6", default-features = false, features = ["driver", "builtin-queue", "rustls", "tws"] }
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "ogg", "isomp4"] }
 tokio.workspace = true
 
 [lints]

@@ -11,6 +11,7 @@ pub use codec::{
 pub use handshake::{client_handshake, server_handshake};
 pub use message::{
     ControlAction, Envelope, GatewayEvent, InteractionPayload, LogLevel, RejectCode, Role,
+    VoiceServerPayload, VoiceStatePayload,
 };
 
 /// Current IPC protocol version.

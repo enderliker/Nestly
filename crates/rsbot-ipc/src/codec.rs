@@ -133,6 +133,16 @@ mod tests {
         let bytes = encode_frame(&envelope).unwrap();
         let decoded: Envelope = decode_frame(&bytes).unwrap();
         assert_eq!(decoded, envelope);
+
+        let voice_send = Envelope::VoiceGatewaySend {
+            guild_id: 12345,
+            channel_id: Some(67890),
+            self_mute: false,
+            self_deaf: true,
+        };
+        let bytes = encode_frame(&voice_send).unwrap();
+        let decoded: Envelope = decode_frame(&bytes).unwrap();
+        assert_eq!(decoded, voice_send);
     }
 
     #[test]

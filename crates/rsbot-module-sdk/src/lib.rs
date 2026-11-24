@@ -10,8 +10,10 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use rsbot_core::{FallbackReason, ModuleManifest};
 use rsbot_ipc::{
-    ControlAction, Envelope, IpcConnection, IpcError, IpcSink, IpcStream, client_handshake,
+    ControlAction, Envelope, GatewayEvent, IpcConnection, IpcError, IpcSink, IpcStream,
+    client_handshake,
 };
+pub use rsbot_ipc::{VoiceServerPayload, VoiceStatePayload};
 use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
@@ -26,6 +28,10 @@ use twilight_model::id::Id;
 
 type BoxFuture = Pin<Box<dyn Future<Output = Result<Response, ModuleError>> + Send>>;
 type Handler = Arc<dyn Fn(CommandContext) -> BoxFuture + Send + Sync>;
+type VoiceStateCallback =
+    Arc<dyn Fn(VoiceStatePayload) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+type VoiceServerCallback =
+    Arc<dyn Fn(VoiceServerPayload) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 /// Errors surfaced by the module runtime.
 #[derive(Debug, Error)]
@@ -213,6 +219,21 @@ impl CommandContext {
             .map(ToOwned::to_owned)
     }
 
+    /// Read a top-level channel option as a snowflake u64 by name.
+    #[must_use]
+    pub fn option_channel_id(&self, name: &str) -> Option<u64> {
+        self.data()?
+            .get("options")?
+            .as_array()?
+            .iter()
+            .find(|option| option.get("name").and_then(Value::as_str) == Some(name))
+            .and_then(|option| option.get("value"))
+            .and_then(|val| {
+                val.as_u64()
+                    .or_else(|| val.as_str().and_then(|s| s.parse::<u64>().ok()))
+            })
+    }
+
     /// Ask the supervisor to restart another module.
     ///
     /// # Errors
@@ -229,6 +250,23 @@ impl CommandContext {
     /// Returns an error when the supervisor does not answer in time.
     pub async fn supervisor_status(&self) -> Result<String, ModuleError> {
         self.control.status().await
+    }
+
+    /// Send a voice gateway command (join or leave a voice channel).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the control channel is closed.
+    pub async fn voice_gateway_send(
+        &self,
+        guild_id: u64,
+        channel_id: Option<u64>,
+        self_mute: bool,
+        self_deaf: bool,
+    ) -> Result<(), ModuleError> {
+        self.control
+            .voice_gateway_send(guild_id, channel_id, self_mute, self_deaf)
+            .await
     }
 }
 
@@ -303,6 +341,24 @@ impl ControlClient {
             .map_err(|_| ModuleError::ControlClosed)
     }
 
+    async fn voice_gateway_send(
+        &self,
+        guild_id: u64,
+        channel_id: Option<u64>,
+        self_mute: bool,
+        self_deaf: bool,
+    ) -> Result<(), ModuleError> {
+        self.tx
+            .send(Envelope::VoiceGatewaySend {
+                guild_id,
+                channel_id,
+                self_mute,
+                self_deaf,
+            })
+            .await
+            .map_err(|_| ModuleError::ControlClosed)
+    }
+
     fn resolve_control(&self, request_id: u64, reply: ControlReply) {
         if let Some(Pending::Control(sender)) = self
             .pending
@@ -330,6 +386,8 @@ impl ControlClient {
 pub struct ModuleBuilder {
     manifest: ModuleManifest,
     handlers: HashMap<String, Handler>,
+    voice_state_handler: Option<VoiceStateCallback>,
+    voice_server_handler: Option<VoiceServerCallback>,
 }
 
 impl ModuleBuilder {
@@ -338,6 +396,8 @@ impl ModuleBuilder {
         Self {
             manifest,
             handlers: HashMap::new(),
+            voice_state_handler: None,
+            voice_server_handler: None,
         }
     }
 
@@ -350,6 +410,28 @@ impl ModuleBuilder {
     {
         let handler: Handler = Arc::new(move |context| Box::pin(handler(context)));
         self.handlers.insert(name.to_owned(), handler);
+        self
+    }
+
+    /// Register a voice state update handler.
+    #[must_use]
+    pub fn on_voice_state<F, Fut>(mut self, handler: F) -> Self
+    where
+        F: Fn(VoiceStatePayload) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.voice_state_handler = Some(Arc::new(move |payload| Box::pin(handler(payload))));
+        self
+    }
+
+    /// Register a voice server update handler.
+    #[must_use]
+    pub fn on_voice_server<F, Fut>(mut self, handler: F) -> Self
+    where
+        F: Fn(VoiceServerPayload) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        self.voice_server_handler = Some(Arc::new(move |payload| Box::pin(handler(payload))));
         self
     }
 
@@ -391,6 +473,8 @@ impl ModuleBuilder {
             rest,
             control,
             module_id,
+            self.voice_state_handler,
+            self.voice_server_handler,
         )
         .await;
 
@@ -433,6 +517,7 @@ async fn heartbeat_task(tx: mpsc::Sender<Envelope>, _rate_limit: u32) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn read_loop(
     mut stream: IpcStream,
     outbound: mpsc::Sender<Envelope>,
@@ -440,6 +525,8 @@ async fn read_loop(
     rest: DiscordRest,
     control: ControlClient,
     module_id: String,
+    voice_state_handler: Option<VoiceStateCallback>,
+    voice_server_handler: Option<VoiceServerCallback>,
 ) -> Result<(), ModuleError> {
     while let Some(frame) = stream.next().await {
         let frame = frame.map_err(IpcError::Io)?;
@@ -552,6 +639,25 @@ async fn read_loop(
                 info!(module = %module_id, "shutdown requested");
                 return Ok(());
             }
+            Envelope::Event { event, .. } => match event {
+                GatewayEvent::VoiceState(payload) => {
+                    if let Some(handler) = &voice_state_handler {
+                        let handler = handler.clone();
+                        tokio::spawn(async move {
+                            handler(*payload).await;
+                        });
+                    }
+                }
+                GatewayEvent::VoiceServer(payload) => {
+                    if let Some(handler) = &voice_server_handler {
+                        let handler = handler.clone();
+                        tokio::spawn(async move {
+                            handler(*payload).await;
+                        });
+                    }
+                }
+                GatewayEvent::Interaction(_) => {}
+            },
             Envelope::Registry { .. }
             | Envelope::ModuleStatus { .. }
             | Envelope::Pong

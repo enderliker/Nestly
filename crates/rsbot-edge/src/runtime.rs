@@ -80,8 +80,16 @@ pub async fn run() -> Result<(), EdgeError> {
     tokio::spawn(writer_task(sink, outbound_rx));
     let _ = outbound_tx.send(Envelope::EdgeReady).await;
 
-    let mut shard = Shard::new(ShardId::ONE, token, Intents::GUILDS);
-    let wanted = EventTypeFlags::INTERACTION_CREATE | EventTypeFlags::READY;
+    let mut shard = Shard::new(
+        ShardId::ONE,
+        token,
+        Intents::GUILDS | Intents::GUILD_VOICE_STATES,
+    );
+    let sender = shard.sender();
+    let wanted = EventTypeFlags::INTERACTION_CREATE
+        | EventTypeFlags::READY
+        | EventTypeFlags::VOICE_STATE_UPDATE
+        | EventTypeFlags::VOICE_SERVER_UPDATE;
     // Read the gateway in its own task. `select!` may then cancel only the
     // receiver, never an in-flight WebSocket read.
     let (gateway_tx, mut gateway_rx) = mpsc::channel::<Event>(128);
@@ -155,6 +163,24 @@ pub async fn run() -> Result<(), EdgeError> {
                             }
                         });
                     }
+                    Envelope::VoiceGatewaySend {
+                        guild_id,
+                        channel_id,
+                        self_mute,
+                        self_deaf,
+                    } => {
+                        use twilight_model::gateway::payload::outgoing::UpdateVoiceState;
+                        use twilight_model::id::Id;
+                        let command = UpdateVoiceState::new(
+                            Id::new(guild_id),
+                            channel_id.map(Id::new),
+                            self_deaf,
+                            self_mute,
+                        );
+                        if let Err(source) = sender.command(&command) {
+                            warn!(error = %source, "failed to send UpdateVoiceState to gateway");
+                        }
+                    }
                     Envelope::Shutdown { .. } => {
                         info!("shutdown requested by the supervisor");
                         gateway_task.abort();
@@ -174,6 +200,49 @@ pub async fn run() -> Result<(), EdgeError> {
                 };
                 match event {
                     Event::Ready(_) => info!("gateway is ready"),
+                    Event::VoiceStateUpdate(state) => {
+                        use rsbot_ipc::VoiceStatePayload;
+                        let payload = VoiceStatePayload {
+                            guild_id: state.0.guild_id.map(twilight_model::id::Id::get),
+                            channel_id: state.0.channel_id.map(twilight_model::id::Id::get),
+                            user_id: state.0.user_id.get(),
+                            session_id: state.0.session_id.clone(),
+                        };
+                        seq = seq.wrapping_add(1);
+                        if outbound_tx
+                            .send(Envelope::Event {
+                                seq,
+                                event: GatewayEvent::VoiceState(Box::new(payload)),
+                            })
+                            .await
+                            .is_err()
+                        {
+                            return Err(EdgeError::InvalidInteraction(
+                                "supervisor IPC closed".to_owned(),
+                            ));
+                        }
+                    }
+                    Event::VoiceServerUpdate(server) => {
+                        use rsbot_ipc::VoiceServerPayload;
+                        let payload = VoiceServerPayload {
+                            guild_id: server.guild_id.get(),
+                            endpoint: server.endpoint.clone(),
+                            token: server.token.clone(),
+                        };
+                        seq = seq.wrapping_add(1);
+                        if outbound_tx
+                            .send(Envelope::Event {
+                                seq,
+                                event: GatewayEvent::VoiceServer(Box::new(payload)),
+                            })
+                            .await
+                            .is_err()
+                        {
+                            return Err(EdgeError::InvalidInteraction(
+                                "supervisor IPC closed".to_owned(),
+                            ));
+                        }
+                    }
                     Event::InteractionCreate(interaction) => {
                         let interaction = interaction.0;
                         let Ok(payload) = interaction_payload(&interaction) else {

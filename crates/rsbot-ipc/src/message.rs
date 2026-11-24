@@ -65,11 +65,30 @@ impl InteractionPayload {
     }
 }
 
+/// A Discord voice state update forwarded from the gateway.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VoiceStatePayload {
+    pub guild_id: Option<u64>,
+    pub channel_id: Option<u64>,
+    pub user_id: u64,
+    pub session_id: String,
+}
+
+/// A Discord voice server update forwarded from the gateway.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VoiceServerPayload {
+    pub guild_id: u64,
+    pub endpoint: Option<String>,
+    pub token: String,
+}
+
 /// Events the edge forwards to the supervisor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GatewayEvent {
     Interaction(Box<InteractionPayload>),
+    VoiceState(Box<VoiceStatePayload>),
+    VoiceServer(Box<VoiceServerPayload>),
 }
 
 /// A supervisor control request.
@@ -176,6 +195,12 @@ pub enum Envelope {
     Shutdown {
         deadline_ms: u64,
     },
+    VoiceGatewaySend {
+        guild_id: u64,
+        channel_id: Option<u64>,
+        self_mute: bool,
+        self_deaf: bool,
+    },
     EdgeReady,
     Ping,
     Pong,
@@ -205,6 +230,7 @@ impl Envelope {
             Self::StatusResult { .. } => "status_result",
             Self::Log { .. } => "log",
             Self::Shutdown { .. } => "shutdown",
+            Self::VoiceGatewaySend { .. } => "voice_gateway_send",
             Self::EdgeReady => "edge_ready",
             Self::Ping => "ping",
             Self::Pong => "pong",

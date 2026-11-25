@@ -385,8 +385,9 @@ pub fn install_crypto_provider() {
 }
 
 fn init_logging() {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,twilight_http_ratelimiting=warn"));
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new("info,twilight_http_ratelimiting=warn")
+    });
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_ansi(false)

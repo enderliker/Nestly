@@ -6,6 +6,21 @@ targets = [
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+  # Transitive dependencies inside songbird 0.6.1 -> davey 0.1.5 (openmls / hpke-rs)
+  # where upstream pins prevent upgrading until songbird/davey publishes new releases.
+  { id = "RUSTSEC-2026-0207", reason = "Pinned via songbird -> davey -> openmls_rust_crypto -> hpke-rs 0.6.1 (^0.0.8); not reachable in DAVE MLS." },
+  { id = "RUSTSEC-2026-0208", reason = "Pinned via songbird -> davey -> openmls_rust_crypto -> hpke-rs 0.6.1 (^0.0.8); not triggered by ML-KEM/ML-DSA." },
+  { id = "RUSTSEC-2026-0212", reason = "Pinned via songbird -> davey -> openmls_rust_crypto -> libcrux-traits 0.0.6 (=0.0.5)." },
+  { id = "RUSTSEC-2026-0387", reason = "Pinned via songbird -> davey -> elliptic-curve 0.13.8 (^0.5)." },
+  # songbird 0.6.1 pins ringbuf ^0.4 for PCM audio sample buffers (Copy primitives; Drop cannot panic).
+  { id = "RUSTSEC-2026-0293", reason = "Pinned via songbird 0.6.1 (^0.4); audio buffers hold primitives whose Drop cannot panic." },
+  # Unmaintained transitive dependencies inside songbird 0.6.1 / davey / openmls.
+  { id = "RUSTSEC-2024-0384", reason = "instant via songbird -> davey -> openmls -> fluvio-wasm-timer -> parking_lot 0.11." },
+  { id = "RUSTSEC-2024-0388", reason = "derivative via songbird 0.6.1." },
+  { id = "RUSTSEC-2026-0441", reason = "pin-utils via songbird -> davey -> openmls -> fluvio-wasm-timer." },
+  { id = "RUSTSEC-2026-0543", reason = "chrono via songbird -> serde-aux." },
+]
 
 [licenses]
 version = 2

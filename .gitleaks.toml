@@ -4,6 +4,7 @@ useDefault = true
 [allowlist]
 description = "Fixture tokens used by tests and documentation"
 paths = [
+  '''Cargo\.lock''',
   '''crates/nestly-supervisor/tests/.*''',
   '''crates/nestly-edge/tests/.*''',
   '''js/test/.*''',

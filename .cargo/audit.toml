@@ -1,0 +1,30 @@
+[advisories]
+ignore = [
+    # Uncompiled optional `serenity` feature in songbird 0.6.1 (disabled in Cargo.toml,
+    # but Cargo.lock still records optional feature edges).
+    "RUSTSEC-2026-0049",
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
+    "RUSTSEC-2026-0346",
+    "RUSTSEC-2026-0349",
+    "RUSTSEC-2026-0382",
+    # Transitive dependencies pinned by songbird 0.6.1 / davey 0.1.5 / hpke-rs 0.6.1.
+    "RUSTSEC-2026-0124",
+    "RUSTSEC-2026-0207",
+    "RUSTSEC-2026-0208",
+    "RUSTSEC-2026-0209",
+    "RUSTSEC-2026-0211",
+    "RUSTSEC-2026-0212",
+    "RUSTSEC-2026-0293",
+    "RUSTSEC-2026-0330",
+    "RUSTSEC-2026-0331",
+    "RUSTSEC-2026-0387",
+    # Unmaintained transitive dependencies in songbird 0.6.1 / davey 0.1.5.
+    "RUSTSEC-2024-0384",
+    "RUSTSEC-2024-0388",
+    "RUSTSEC-2026-0173",
+    "RUSTSEC-2026-0210",
+    "RUSTSEC-2026-0441",
+    "RUSTSEC-2026-0543",
+]

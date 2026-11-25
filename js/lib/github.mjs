@@ -275,7 +275,7 @@ export function validateManifest(manifest, { target, maxBytes }) {
   const names = new Set(assets.map((asset) => asset.name));
   for (const required of ['supervisor', 'edge']) {
     if (!names.has(`nestly-${required}`) && !names.has(`rsbot-${required}`)) {
-      throw new GitHubError(`the manifest is missing the ${required} asset`);
+      throw new GitHubError(`the manifest is missing the nestly-${required} asset`);
     }
   }
 

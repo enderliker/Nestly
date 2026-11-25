@@ -7,7 +7,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 profile_dir="${NESTLY_PROFILE_DIR:-${RSBOT_PROFILE_DIR:-$root/target/release}}"
 
 cd "$root"
-cargo build --release --workspace --quiet
+cargo build --release --bin nestly-supervisor --bin nestly-edge --bin nestly-mod-music --bin nestly-mod-ops --quiet
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT

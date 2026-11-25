@@ -10,13 +10,20 @@ repository.workspace = true
 name = "nestly-mod-music"
 path = "src/main.rs"
 [dependencies]
+async-trait = "0.1"
 nestly-core = { path = "../../nestly-core" }
 nestly-module-sdk = { path = "../../nestly-module-sdk" }
 reqwest = { workspace = true }
 serde_json.workspace = true
 songbird = { version = "0.6", default-features = false, features = ["driver", "builtin-queue", "rustls", "tws"] }
-symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "ogg", "isomp4"] }
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "ogg", "isomp4", "mkv", "vorbis", "flac", "wav", "pcm"] }
 tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+rustls.workspace = true
+twilight-gateway.workspace = true
+twilight-model.workspace = true
 
 [lints]
 workspace = true

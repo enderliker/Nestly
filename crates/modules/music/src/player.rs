@@ -5,9 +5,28 @@ use std::num::NonZeroU64;
 
 use nestly_module_sdk::{VoiceServerPayload, VoiceStatePayload};
 use songbird::driver::Driver;
-use songbird::input::YoutubeDl;
+use songbird::events::{Event, EventContext, EventHandler as VoiceEventHandler, TrackEvent};
 use songbird::tracks::TrackHandle;
 use songbird::{Config, ConnectionInfo};
+
+struct TrackErrorLogger;
+
+#[async_trait::async_trait]
+impl VoiceEventHandler for TrackErrorLogger {
+    async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
+        if let EventContext::Track(tracks) = ctx {
+            for (state, handle) in *tracks {
+                tracing::error!(
+                    uuid = %handle.uuid(),
+                    playing = ?state.playing,
+                    position = ?state.position,
+                    "songbird track playback error"
+                );
+            }
+        }
+        None
+    }
+}
 
 /// A track waiting or playing in the guild queue.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +51,7 @@ pub struct GuildPlayer {
     pub endpoint: Option<String>,
     pub token: Option<String>,
     pub is_paused: bool,
+    pub ytdlp_program: &'static str,
 }
 
 impl GuildPlayer {
@@ -49,6 +69,7 @@ impl GuildPlayer {
             endpoint: None,
             token: None,
             is_paused: false,
+            ytdlp_program: "yt-dlp",
         }
     }
 
@@ -98,9 +119,10 @@ impl GuildPlayer {
 
     /// Starts playing a track immediately on the driver.
     pub fn play_track(&mut self, track: QueuedTrack, client: reqwest::Client) {
-        let source = YoutubeDl::new(client, track.target.clone());
+        let source = crate::source::create_source(self.ytdlp_program, client, track.target.clone());
         let input: songbird::input::Input = source.into();
         let handle = self.driver.play_input(input);
+        let _ = handle.add_event(Event::Track(TrackEvent::Error), TrackErrorLogger);
         self.handle = Some(handle);
         self.current = Some(track);
         self.is_paused = false;

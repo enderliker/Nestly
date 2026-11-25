@@ -1,9 +1,6 @@
 #![forbid(unsafe_code)]
 //! Music module: voice playback for `YouTube` and `SoundCloud` via `Songbird`.
 
-mod player;
-mod source;
-
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -11,9 +8,9 @@ use nestly_core::{
     CommandOptionKind, CommandOptionSpec, CommandSpec, ModuleLimits, ModuleManifest,
     ProtocolVersion,
 };
+use nestly_mod_music::player::{MusicManager, QueuedTrack};
+use nestly_mod_music::source::{self, AudioProvider};
 use nestly_module_sdk::{CommandContext, ModuleBuilder, Response};
-use player::{MusicManager, QueuedTrack};
-use source::AudioProvider;
 use tokio::sync::Mutex;
 
 /// Commands are valid Discord names (no dots).
@@ -123,23 +120,54 @@ async fn handle_play(
         .await
         .map_err(|source| format!("cannot send voice join command: {source}"))?;
 
+    let deferred = context
+        .rest
+        .respond(&context.interaction, Response::Defer { ephemeral: false })
+        .await
+        .is_ok();
+
     let target = source::resolve_query(&query, provider);
     let http_client = {
         let mgr = manager.lock().await;
         mgr.client()
     };
 
-    // Attempt to inspect metadata asynchronously
-    let mut ytdl = source::create_source(http_client.clone(), target.clone());
-    let metadata = source::fetch_metadata(&mut ytdl).await.ok();
+    let ytdlp_program = match source::resolve_ytdlp_program(&http_client).await {
+        Ok(program) => program,
+        Err(err) => {
+            tracing::error!(error = %err, "yt-dlp unavailable");
+            let msg = format!("❌ Playback error: {err}");
+            if deferred {
+                let _ = context
+                    .rest
+                    .update_original(&context.interaction, &msg)
+                    .await;
+                return Ok(Response::None);
+            }
+            return Ok(Response::ephemeral(msg));
+        }
+    };
 
-    let title = metadata
-        .as_ref()
-        .map_or_else(|| query.clone(), |m| m.title.clone());
-    let artist = metadata
-        .as_ref()
-        .map_or_else(|| provider.as_str().to_owned(), |m| m.artist.clone());
-    let duration_secs = metadata.as_ref().and_then(|m| m.duration_secs);
+    let mut ytdl = source::create_source(ytdlp_program, http_client.clone(), target.clone());
+    let metadata = match source::fetch_metadata(&mut ytdl).await {
+        Ok(meta) => meta,
+        Err(err) => {
+            tracing::warn!(target = %target, error = %err, "failed to load track metadata");
+            let msg = format!("❌ Could not load track: {err}");
+            if deferred {
+                let _ = context
+                    .rest
+                    .update_original(&context.interaction, &msg)
+                    .await;
+                return Ok(Response::None);
+            }
+            return Ok(Response::ephemeral(msg));
+        }
+    };
+
+    let title = metadata.title;
+    let artist = metadata.artist;
+    let duration_secs = metadata.duration_secs;
 
     let track = QueuedTrack {
         target,
@@ -152,6 +180,7 @@ async fn handle_play(
     let (was_empty, queue_len) = {
         let mut mgr = manager.lock().await;
         let player = mgr.player_mut(guild_id);
+        player.ytdlp_program = ytdlp_program;
         let empty = player.current.is_none();
         player.enqueue(track, http_client);
         let len = player.queue.len();
@@ -167,7 +196,15 @@ async fn handle_play(
         )
     };
 
-    Ok(Response::message(response_text))
+    if deferred {
+        let _ = context
+            .rest
+            .update_original(&context.interaction, &response_text)
+            .await;
+        Ok(Response::None)
+    } else {
+        Ok(Response::message(response_text))
+    }
 }
 
 async fn handle_skip(

@@ -251,7 +251,24 @@ const invokedDirectly =
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 
+function loadDotEnv() {
+  const candidates = [
+    path.resolve(process.cwd(), ".env"),
+    path.resolve(import.meta.dirname, "..", ".env"),
+  ];
+  for (const candidate of new Set(candidates)) {
+    try {
+      process.loadEnvFile(candidate);
+    } catch (source) {
+      if (source?.code !== "ENOENT") {
+        throw source;
+      }
+    }
+  }
+}
+
 if (invokedDirectly) {
+  loadDotEnv();
   const { code } = await main();
   process.exitCode = code;
 }

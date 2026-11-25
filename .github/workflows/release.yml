@@ -27,6 +27,9 @@ jobs:
       - name: Install musl tools
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Build static binaries
+        env:
+          LIBOPUS_NO_PKG: "1"
+          LIBOPUS_STATIC: "1"
         run: cargo build --release --target "$TARGET" --bin nestly-supervisor --bin nestly-edge --bin nestly-mod-music --bin nestly-mod-ops
       - name: Test
         run: cargo test --workspace

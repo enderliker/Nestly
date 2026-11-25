@@ -2,7 +2,10 @@ target
 .git
 .github
 js/node_modules
+nestlybins
 rsbotbins
+nestly.toml
+rsbot.toml
 state
 *.log
 .env

@@ -29,7 +29,7 @@ jobs:
       - name: Test
         run: cargo test --workspace
       - name: Validate the example configuration
-        run: cargo run --quiet -p rsbot-supervisor --bin rsbot-supervisor -- --config config/rsbot.example.toml --check
+        run: cargo run --quiet -p nestly-supervisor --bin nestly-supervisor -- --config config/nestly.example.toml --check
 
   launcher:
     name: Launcher

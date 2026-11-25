@@ -3,7 +3,12 @@
 .env
 .env.*
 !.env.example
+nestlybins/
+nestly-state/
 rsbotbins/
+rsbot-state/
+nestly.toml
+rsbot.toml
 state/
 logs/
 *.log

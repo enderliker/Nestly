@@ -114,8 +114,9 @@ impl AlertSink {
                     .notifications
                     .token_env
                     .as_deref()
-                    .unwrap_or(&config.discord.token_env);
-                let token = std::env::var(token).ok();
+                    .and_then(|name| std::env::var(name).ok())
+                    .filter(|value| !value.trim().is_empty())
+                    .or_else(|| std::env::var(&config.discord.token_env).ok());
                 match (channel_id, token) {
                     (Some(channel_id), Some(token)) if !token.trim().is_empty() => {
                         let client = reqwest::Client::builder()

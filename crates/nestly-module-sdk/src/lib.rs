@@ -497,7 +497,7 @@ async fn writer_task(mut sink: IpcSink, mut rx: mpsc::Receiver<Envelope>) -> Res
 }
 
 async fn heartbeat_task(tx: mpsc::Sender<Envelope>, _rate_limit: u32) {
-    let mut interval = tokio::time::interval(Duration::from_secs(1));
+    let mut interval = tokio::time::interval(Duration::from_millis(500));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut seq = 0_u64;
     loop {
@@ -676,6 +676,8 @@ fn init_logging(module: &str) {
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
+        .with_ansi(false)
+        .without_time()
         .with_target(false)
         .with_writer(std::io::stdout)
         .try_init();

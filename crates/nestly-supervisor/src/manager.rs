@@ -694,7 +694,11 @@ impl Supervisor {
 
     fn handle_log_line(&mut self, id: &str, stream: &str, line: &str) {
         let redacted = self.redactor.redact(line);
-        info!(module = %id, stream = %stream, "{}", redacted);
+        if stream == "stdout" {
+            info!(module = %id, "{}", redacted);
+        } else {
+            info!(module = %id, stream = %stream, "{}", redacted);
+        }
         if let Some(service) = self.services.get_mut(id) {
             service.ring.push_back(redacted);
             while service.ring.len() > self.config.supervisor.log_ring_lines {

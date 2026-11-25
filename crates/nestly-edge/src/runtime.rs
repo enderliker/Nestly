@@ -19,6 +19,8 @@ use crate::{
 
 const OUTBOUND_QUEUE: usize = 256;
 const COMMAND_REGISTRY_LIMIT: usize = 100;
+const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+const REGISTER_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// The manifest presented to the supervisor. It must match
 /// `Config::edge_manifest` exactly.
@@ -77,8 +79,9 @@ pub async fn run() -> Result<(), EdgeError> {
 
     let (sink, mut ipc) = connection.split();
     let (outbound_tx, outbound_rx) = mpsc::channel::<Envelope>(OUTBOUND_QUEUE);
-    tokio::spawn(writer_task(sink, outbound_rx));
+    let writer = tokio::spawn(writer_task(sink, outbound_rx));
     let _ = outbound_tx.send(Envelope::EdgeReady).await;
+    let heartbeat = tokio::spawn(heartbeat_task(outbound_tx.clone()));
 
     let mut shard = Shard::new(
         ShardId::ONE,
@@ -109,36 +112,22 @@ pub async fn run() -> Result<(), EdgeError> {
     let mut seq = 0_u64;
     let mut known_commands: Option<HashSet<String>> = None;
     let mut last_registered: Option<Vec<twilight_model::application::command::Command>> = None;
+    let mut pending_commands: Option<Vec<twilight_model::application::command::Command>> = None;
+    let mut register_deadline: Option<tokio::time::Instant> = None;
 
-    loop {
-        tokio::select! {
-            incoming = ipc.next() => {
-                let Some(frame) = incoming else {
-                    info!("supervisor closed the IPC channel");
-                    return Ok(());
-                };
-                let envelope: Envelope = nestly_ipc::decode_frame(&frame?)?;
-                match envelope {
-                    Envelope::Registry { modules } => {
-                        let mut commands = commands_from_registry(&modules);
-                        if commands.len() > COMMAND_REGISTRY_LIMIT {
-                            warn!(
-                                declared = commands.len(),
-                                limit = COMMAND_REGISTRY_LIMIT,
-                                "discarding commands above the Discord limit"
-                            );
-                            commands.truncate(COMMAND_REGISTRY_LIMIT);
-                        }
-                        known_commands = Some(
-                            commands
-                                .iter()
-                                .map(|command| command.name.clone())
-                                .collect(),
-                        );
-                        if last_registered.as_ref() == Some(&commands) {
-                            debug!("command registry unchanged");
-                            continue;
-                        }
+    let result = async {
+        loop {
+            tokio::select! {
+                () = async {
+                    match register_deadline {
+                        Some(deadline) => tokio::time::sleep_until(deadline).await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    register_deadline = None;
+                    if let Some(commands) = pending_commands.take()
+                        && last_registered.as_ref() != Some(&commands)
+                    {
                         last_registered = Some(commands.clone());
                         let client = client.clone();
                         tokio::spawn(async move {
@@ -148,147 +137,208 @@ pub async fn run() -> Result<(), EdgeError> {
                             }
                         });
                     }
-                    Envelope::Fallback { module, interaction, reason, acked } => {
-                        let client = client.clone();
-                        tokio::spawn(async move {
-                            if let Err(source) = deliver_fallback(
-                                &client,
-                                application_id,
-                                &interaction,
-                                &module,
-                                reason,
-                                acked,
-                            ).await {
-                                warn!(module = %module, reason = reason.as_str(), error = %source, "cannot deliver fallback");
-                            }
-                        });
-                    }
-                    Envelope::VoiceGatewaySend {
-                        guild_id,
-                        channel_id,
-                        self_mute,
-                        self_deaf,
-                    } => {
-                        use twilight_model::gateway::payload::outgoing::UpdateVoiceState;
-                        use twilight_model::id::Id;
-                        let command = UpdateVoiceState::new(
-                            Id::new(guild_id),
-                            channel_id.map(Id::new),
-                            self_deaf,
-                            self_mute,
-                        );
-                        if let Err(source) = sender.command(&command) {
-                            warn!(error = %source, "failed to send UpdateVoiceState to gateway");
-                        }
-                    }
-                    Envelope::Shutdown { .. } => {
-                        info!("shutdown requested by the supervisor");
-                        gateway_task.abort();
-                        return Ok(());
-                    }
-                    Envelope::Ping => {
-                        let _ = outbound_tx.send(Envelope::Pong).await;
-                    }
-                    other => debug!(kind = other.kind(), "ignoring IPC envelope"),
                 }
-            }
-            event = gateway_rx.recv() => {
-                let Some(event) = event else {
-                    return Err(EdgeError::InvalidInteraction(
-                        "gateway stream ended".to_owned(),
-                    ));
-                };
-                match event {
-                    Event::Ready(_) => info!("gateway is ready"),
-                    Event::VoiceStateUpdate(state) => {
-                        use nestly_ipc::VoiceStatePayload;
-                        let payload = VoiceStatePayload {
-                            guild_id: state.0.guild_id.map(twilight_model::id::Id::get),
-                            channel_id: state.0.channel_id.map(twilight_model::id::Id::get),
-                            user_id: state.0.user_id.get(),
-                            session_id: state.0.session_id.clone(),
-                        };
-                        seq = seq.wrapping_add(1);
-                        if outbound_tx
-                            .send(Envelope::Event {
-                                seq,
-                                event: GatewayEvent::VoiceState(Box::new(payload)),
-                            })
-                            .await
-                            .is_err()
-                        {
-                            return Err(EdgeError::InvalidInteraction(
-                                "supervisor IPC closed".to_owned(),
-                            ));
-                        }
-                    }
-                    Event::VoiceServerUpdate(server) => {
-                        use nestly_ipc::VoiceServerPayload;
-                        let payload = VoiceServerPayload {
-                            guild_id: server.guild_id.get(),
-                            endpoint: server.endpoint.clone(),
-                            token: server.token.clone(),
-                        };
-                        seq = seq.wrapping_add(1);
-                        if outbound_tx
-                            .send(Envelope::Event {
-                                seq,
-                                event: GatewayEvent::VoiceServer(Box::new(payload)),
-                            })
-                            .await
-                            .is_err()
-                        {
-                            return Err(EdgeError::InvalidInteraction(
-                                "supervisor IPC closed".to_owned(),
-                            ));
-                        }
-                    }
-                    Event::InteractionCreate(interaction) => {
-                        let interaction = interaction.0;
-                        let Ok(payload) = interaction_payload(&interaction) else {
-                            warn!("dropping an interaction that cannot be encoded");
-                            continue;
-                        };
-                        if !guild_allowed(&allowed_guilds, payload.guild_id) {
-                            warn!(
-                                guild_id = ?payload.guild_id,
-                                "ignoring an interaction outside the guild allowlist"
+                incoming = ipc.next() => {
+                    let Some(frame) = incoming else {
+                        info!("supervisor closed the IPC channel");
+                        return Ok(());
+                    };
+                    let envelope: Envelope = nestly_ipc::decode_frame(&frame?)?;
+                    match envelope {
+                        Envelope::Registry { modules } => {
+                            let mut commands = commands_from_registry(&modules);
+                            if commands.len() > COMMAND_REGISTRY_LIMIT {
+                                warn!(
+                                    declared = commands.len(),
+                                    limit = COMMAND_REGISTRY_LIMIT,
+                                    "discarding commands above the Discord limit"
+                                );
+                                commands.truncate(COMMAND_REGISTRY_LIMIT);
+                            }
+                            known_commands = Some(
+                                commands
+                                    .iter()
+                                    .map(|command| command.name.clone())
+                                    .collect(),
                             );
-                            continue;
+                            if last_registered.as_ref() == Some(&commands) {
+                                debug!("command registry unchanged");
+                                pending_commands = None;
+                                register_deadline = None;
+                                continue;
+                            }
+                            pending_commands = Some(commands);
+                            register_deadline = Some(tokio::time::Instant::now() + REGISTER_DEBOUNCE);
                         }
-                        if let (Some(known), Some(command)) = (&known_commands, &payload.command_name)
-                            && !known.contains(command)
-                        {
+                        Envelope::Fallback { module, interaction, reason, acked } => {
                             let client = client.clone();
-                            let payload = payload.clone();
                             tokio::spawn(async move {
-                                let _ = deliver_notice(
+                                if let Err(source) = deliver_fallback(
                                     &client,
                                     application_id,
-                                    &payload,
-                                    "Unknown command.",
-                                    true,
-                                ).await;
+                                    &interaction,
+                                    &module,
+                                    reason,
+                                    acked,
+                                ).await {
+                                    warn!(module = %module, reason = reason.as_str(), error = %source, "cannot deliver fallback");
+                                }
                             });
-                            continue;
                         }
-                        seq = seq.wrapping_add(1);
-                        if outbound_tx
-                            .send(Envelope::Event {
-                                seq,
-                                event: GatewayEvent::Interaction(Box::new(payload)),
-                            })
-                            .await
-                            .is_err()
-                        {
-                            return Err(EdgeError::InvalidInteraction(
-                                "supervisor IPC closed".to_owned(),
-                            ));
+                        Envelope::VoiceGatewaySend {
+                            guild_id,
+                            channel_id,
+                            self_mute,
+                            self_deaf,
+                        } => {
+                            use twilight_model::gateway::payload::outgoing::UpdateVoiceState;
+                            use twilight_model::id::Id;
+                            let command = UpdateVoiceState::new(
+                                Id::new(guild_id),
+                                channel_id.map(Id::new),
+                                self_deaf,
+                                self_mute,
+                            );
+                            if let Err(source) = sender.command(&command) {
+                                warn!(error = %source, "failed to send UpdateVoiceState to gateway");
+                            }
                         }
+                        Envelope::Shutdown { .. } => {
+                            info!("shutdown requested by the supervisor");
+                            return Ok(());
+                        }
+                        Envelope::Ping => {
+                            let _ = outbound_tx.send(Envelope::Pong).await;
+                        }
+                        other => debug!(kind = other.kind(), "ignoring IPC envelope"),
                     }
-                    _ => {}
+                }
+                event = gateway_rx.recv() => {
+                    let Some(event) = event else {
+                        return Err(EdgeError::InvalidInteraction(
+                            "gateway stream ended".to_owned(),
+                        ));
+                    };
+                    match event {
+                        Event::Ready(_) => info!("gateway is ready"),
+                        Event::VoiceStateUpdate(state) => {
+                            use nestly_ipc::VoiceStatePayload;
+                            let payload = VoiceStatePayload {
+                                guild_id: state.0.guild_id.map(twilight_model::id::Id::get),
+                                channel_id: state.0.channel_id.map(twilight_model::id::Id::get),
+                                user_id: state.0.user_id.get(),
+                                session_id: state.0.session_id.clone(),
+                            };
+                            seq = seq.wrapping_add(1);
+                            if outbound_tx
+                                .send(Envelope::Event {
+                                    seq,
+                                    event: GatewayEvent::VoiceState(Box::new(payload)),
+                                })
+                                .await
+                                .is_err()
+                            {
+                                return Err(EdgeError::InvalidInteraction(
+                                    "supervisor IPC closed".to_owned(),
+                                ));
+                            }
+                        }
+                        Event::VoiceServerUpdate(server) => {
+                            use nestly_ipc::VoiceServerPayload;
+                            let payload = VoiceServerPayload {
+                                guild_id: server.guild_id.get(),
+                                endpoint: server.endpoint.clone(),
+                                token: server.token.clone(),
+                            };
+                            seq = seq.wrapping_add(1);
+                            if outbound_tx
+                                .send(Envelope::Event {
+                                    seq,
+                                    event: GatewayEvent::VoiceServer(Box::new(payload)),
+                                })
+                                .await
+                                .is_err()
+                            {
+                                return Err(EdgeError::InvalidInteraction(
+                                    "supervisor IPC closed".to_owned(),
+                                ));
+                            }
+                        }
+                        Event::InteractionCreate(interaction) => {
+                            let interaction = interaction.0;
+                            let Ok(payload) = interaction_payload(&interaction) else {
+                                warn!("dropping an interaction that cannot be encoded");
+                                continue;
+                            };
+                            if !guild_allowed(&allowed_guilds, payload.guild_id) {
+                                warn!(
+                                    guild_id = ?payload.guild_id,
+                                    "ignoring an interaction outside the guild allowlist"
+                                );
+                                continue;
+                            }
+                            if let (Some(known), Some(command)) = (&known_commands, &payload.command_name)
+                                && !known.contains(command)
+                            {
+                                let client = client.clone();
+                                let payload = payload.clone();
+                                tokio::spawn(async move {
+                                    let _ = deliver_notice(
+                                        &client,
+                                        application_id,
+                                        &payload,
+                                        "Unknown command.",
+                                        true,
+                                    ).await;
+                                });
+                                continue;
+                            }
+                            seq = seq.wrapping_add(1);
+                            if outbound_tx
+                                .send(Envelope::Event {
+                                    seq,
+                                    event: GatewayEvent::Interaction(Box::new(payload)),
+                                })
+                                .await
+                                .is_err()
+                            {
+                                return Err(EdgeError::InvalidInteraction(
+                                    "supervisor IPC closed".to_owned(),
+                                ));
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
+        }
+    }
+    .await;
+
+    gateway_task.abort();
+    heartbeat.abort();
+    drop(outbound_tx);
+    let _ = writer.await;
+    result
+}
+
+async fn heartbeat_task(tx: mpsc::Sender<Envelope>) {
+    let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut seq = 0_u64;
+    loop {
+        interval.tick().await;
+        seq = seq.wrapping_add(1);
+        if tx
+            .send(Envelope::Health {
+                seq,
+                rss_kb: 0,
+                queue_depth: 0,
+            })
+            .await
+            .is_err()
+        {
+            return;
         }
     }
 }
@@ -336,9 +386,11 @@ pub fn install_crypto_provider() {
 
 fn init_logging() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,twilight_http_ratelimiting=warn"));
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
+        .with_ansi(false)
+        .without_time()
         .with_target(false)
         .with_writer(std::io::stdout)
         .try_init();

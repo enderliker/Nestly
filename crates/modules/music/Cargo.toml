@@ -19,7 +19,7 @@ songbird = { version = "0.6", default-features = false, features = ["driver", "b
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "aac", "ogg", "isomp4", "mkv", "vorbis", "flac", "wav", "pcm"] }
 tokio.workspace = true
 tracing.workspace = true
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 rustls.workspace = true

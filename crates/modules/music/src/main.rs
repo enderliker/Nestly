@@ -115,10 +115,15 @@ async fn handle_play(
     };
 
     // Request the edge gateway to connect to the target voice channel
-    context
+    if let Err(source) = context
         .voice_gateway_send(guild_id, Some(channel_id), false, false)
         .await
-        .map_err(|source| format!("cannot send voice join command: {source}"))?;
+    {
+        tracing::error!(error = %source, "cannot send voice join command");
+        return Ok(Response::ephemeral(
+            "⚠️ Something went wrong while connecting to voice. Please try again.",
+        ));
+    }
 
     let deferred = context
         .rest
@@ -136,11 +141,11 @@ async fn handle_play(
         Ok(program) => program,
         Err(err) => {
             tracing::error!(error = %err, "yt-dlp unavailable");
-            let msg = format!("❌ Playback error: {err}");
+            let msg = "⚠️ Something went wrong while preparing playback. Please try again.";
             if deferred {
                 let _ = context
                     .rest
-                    .update_original(&context.interaction, &msg)
+                    .update_original(&context.interaction, msg)
                     .await;
                 return Ok(Response::None);
             }
@@ -153,11 +158,11 @@ async fn handle_play(
         Ok(meta) => meta,
         Err(err) => {
             tracing::warn!(target = %target, error = %err, "failed to load track metadata");
-            let msg = format!("❌ Could not load track: {err}");
+            let msg = "⚠️ Something went wrong while loading that track. Please try again.";
             if deferred {
                 let _ = context
                     .rest
-                    .update_original(&context.interaction, &msg)
+                    .update_original(&context.interaction, msg)
                     .await;
                 return Ok(Response::None);
             }
@@ -392,33 +397,37 @@ async fn main() -> ExitCode {
         .command("music-play", move |context| {
             let mgr = play_mgr.clone();
             async move {
-                Ok(handle_play(&context, &mgr)
-                    .await
-                    .unwrap_or_else(Response::ephemeral))
+                Ok(handle_play(&context, &mgr).await.unwrap_or_else(|err| {
+                    tracing::error!(error = %err, "music-play handler failed");
+                    Response::ephemeral("⚠️ Something went wrong. Please try again.")
+                }))
             }
         })
         .command("music-skip", move |context| {
             let mgr = skip_mgr.clone();
             async move {
-                Ok(handle_skip(&context, &mgr)
-                    .await
-                    .unwrap_or_else(Response::ephemeral))
+                Ok(handle_skip(&context, &mgr).await.unwrap_or_else(|err| {
+                    tracing::error!(error = %err, "music-skip handler failed");
+                    Response::ephemeral("⚠️ Something went wrong. Please try again.")
+                }))
             }
         })
         .command("music-pause", move |context| {
             let mgr = pause_mgr.clone();
             async move {
-                Ok(handle_pause(&context, &mgr)
-                    .await
-                    .unwrap_or_else(Response::ephemeral))
+                Ok(handle_pause(&context, &mgr).await.unwrap_or_else(|err| {
+                    tracing::error!(error = %err, "music-pause handler failed");
+                    Response::ephemeral("⚠️ Something went wrong. Please try again.")
+                }))
             }
         })
         .command("music-stop", move |context| {
             let mgr = stop_mgr.clone();
             async move {
-                Ok(handle_stop(&context, &mgr)
-                    .await
-                    .unwrap_or_else(Response::ephemeral))
+                Ok(handle_stop(&context, &mgr).await.unwrap_or_else(|err| {
+                    tracing::error!(error = %err, "music-stop handler failed");
+                    Response::ephemeral("⚠️ Something went wrong. Please try again.")
+                }))
             }
         })
         .command("music-nowplaying", move |context| {
@@ -426,15 +435,19 @@ async fn main() -> ExitCode {
             async move {
                 Ok(handle_nowplaying(&context, &mgr)
                     .await
-                    .unwrap_or_else(Response::ephemeral))
+                    .unwrap_or_else(|err| {
+                        tracing::error!(error = %err, "music-nowplaying handler failed");
+                        Response::ephemeral("⚠️ Something went wrong. Please try again.")
+                    }))
             }
         })
         .command("music-queue", move |context| {
             let mgr = queue_mgr.clone();
             async move {
-                Ok(handle_queue(&context, &mgr)
-                    .await
-                    .unwrap_or_else(Response::ephemeral))
+                Ok(handle_queue(&context, &mgr).await.unwrap_or_else(|err| {
+                    tracing::error!(error = %err, "music-queue handler failed");
+                    Response::ephemeral("⚠️ Something went wrong. Please try again.")
+                }))
             }
         })
         .run()

@@ -1,13 +1,21 @@
 //! Audio source resolution for `YouTube` and `SoundCloud`.
 
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::OnceLock;
+use std::time::Duration;
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use songbird::input::metadata::YoutubeDlOutput;
-use songbird::input::{Compose, HlsRequest, HttpRequest, Input, LiveInput, YoutubeDl};
-use tokio::sync::OnceCell;
+use songbird::input::{Compose, HlsRequest, HttpRequest, Input, LiveInput};
+use tokio::process::Command;
+use tokio::sync::{OnceCell, Semaphore};
 
 static YTDLP_PROGRAM: OnceCell<String> = OnceCell::const_new();
+static YTDLP_SEMAPHORE: Semaphore = Semaphore::const_new(1);
+
+const YTDLP_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_YTDLP_NICE: &str = "19";
 
 #[cfg(target_os = "linux")]
 const YTDLP_ZIPAPP_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
@@ -19,14 +27,24 @@ const YTDLP_ZIPAPP_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest
 #[cfg(not(target_os = "linux"))]
 const YTDLP_ONEDIR_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
 
-async fn is_executable(program: &str) -> bool {
-    tokio::process::Command::new(program)
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await
-        .is_ok_and(|status| status.success())
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .is_ok_and(|meta| meta.is_file() && (meta.permissions().mode() & 0o111 != 0))
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|meta| meta.is_file())
+}
+
+fn resolve_executable(program: &str) -> Option<String> {
+    if program.contains(std::path::MAIN_SEPARATOR) || program.contains('/') {
+        let path = Path::new(program);
+        return is_executable_file(path).then(|| program.to_owned());
+    }
+    which(program).map(|path| path.to_string_lossy().into_owned())
 }
 
 fn cache_dirs() -> Vec<PathBuf> {
@@ -44,6 +62,31 @@ fn cache_dirs() -> Vec<PathBuf> {
     }
     dirs.push(std::env::temp_dir().join("nestly-yt-dlp-dir"));
     dirs
+}
+
+fn prefer_onedir() -> bool {
+    if let Ok(mode) = std::env::var("NESTLY_YTDLP_MODE") {
+        let trimmed = mode.trim();
+        if trimmed.eq_ignore_ascii_case("zipapp") {
+            return false;
+        }
+        if trimmed.eq_ignore_ascii_case("onedir") {
+            return true;
+        }
+    }
+    cfg!(all(target_os = "linux", target_arch = "x86_64"))
+}
+
+fn find_cached_binary(dirs: &[PathBuf], rel_paths: &[&str]) -> Option<String> {
+    for dir in dirs {
+        for rel in rel_paths {
+            let candidate = dir.join(rel);
+            if is_executable_file(&candidate) {
+                return Some(candidate.to_string_lossy().into_owned());
+            }
+        }
+    }
+    None
 }
 
 async fn download_bytes(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
@@ -94,10 +137,56 @@ async fn install_zipapp(client: &reqwest::Client, dir: &Path) -> Result<PathBuf,
 }
 
 fn extract_onedir_zip(bytes: &[u8], dir: &Path) -> Result<PathBuf, String> {
+    let staging = dir.join("onedir.tmp");
+    let final_dir = dir.join("onedir");
+    let _ = std::fs::remove_dir_all(&staging);
+    std::fs::create_dir_all(&staging)
+        .map_err(|err| format!("failed to create {}: {err}", staging.display()))?;
+
+    let res = extract_onedir_into(&staging, bytes);
+    let rel_bin = match res {
+        Ok(rel) => rel,
+        Err(err) => {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(err);
+        }
+    };
+
+    let backup = dir.join("onedir.old");
+    let _ = std::fs::remove_dir_all(&backup);
+    if final_dir.exists() {
+        std::fs::rename(&final_dir, &backup).map_err(|err| {
+            let _ = std::fs::remove_dir_all(&staging);
+            format!("failed to replace {}: {err}", final_dir.display())
+        })?;
+    }
+    if let Err(err) = std::fs::rename(&staging, &final_dir) {
+        if backup.exists() {
+            let _ = std::fs::rename(&backup, &final_dir);
+        }
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(format!(
+            "failed to move {} to {}: {err}",
+            staging.display(),
+            final_dir.display()
+        ));
+    }
+    let _ = std::fs::remove_dir_all(&backup);
+
+    let bin = final_dir.join(rel_bin);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755));
+    }
+    Ok(bin)
+}
+
+fn extract_onedir_into(staging: &Path, bytes: &[u8]) -> Result<PathBuf, String> {
     let cursor = std::io::Cursor::new(bytes);
     let mut archive =
         zip::ZipArchive::new(cursor).map_err(|err| format!("invalid yt-dlp zip archive: {err}"))?;
-    let mut binary_path: Option<PathBuf> = None;
+    let mut rel_binary: Option<PathBuf> = None;
 
     for i in 0..archive.len() {
         let mut entry = archive
@@ -106,7 +195,7 @@ fn extract_onedir_zip(bytes: &[u8], dir: &Path) -> Result<PathBuf, String> {
         let Some(rel_path) = entry.enclosed_name() else {
             continue;
         };
-        let out_path = dir.join(rel_path);
+        let out_path = staging.join(&rel_path);
         if entry.is_dir() {
             std::fs::create_dir_all(&out_path)
                 .map_err(|err| format!("failed to create {}: {err}", out_path.display()))?;
@@ -115,6 +204,25 @@ fn extract_onedir_zip(bytes: &[u8], dir: &Path) -> Result<PathBuf, String> {
         if let Some(parent) = out_path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
+        }
+        #[cfg(unix)]
+        if entry.is_symlink() {
+            use std::io::Read;
+            let mut target = String::new();
+            entry
+                .read_to_string(&mut target)
+                .map_err(|err| format!("failed to read symlink {}: {err}", out_path.display()))?;
+            let target_path = Path::new(&target);
+            let safe = !target_path.is_absolute()
+                && !target_path
+                    .components()
+                    .any(|c| matches!(c, std::path::Component::ParentDir));
+            if safe {
+                std::os::unix::fs::symlink(target_path, &out_path).map_err(|err| {
+                    format!("failed to create symlink {}: {err}", out_path.display())
+                })?;
+                continue;
+            }
         }
         let mut outfile = std::fs::File::create(&out_path)
             .map_err(|err| format!("failed to create {}: {err}", out_path.display()))?;
@@ -129,7 +237,7 @@ fn extract_onedir_zip(bytes: &[u8], dir: &Path) -> Result<PathBuf, String> {
             }
         }
 
-        if out_path
+        if rel_path
             .file_name()
             .and_then(|n| n.to_str())
             .is_some_and(|name| name == "yt-dlp_linux" || name == "yt-dlp")
@@ -139,11 +247,11 @@ fn extract_onedir_zip(bytes: &[u8], dir: &Path) -> Result<PathBuf, String> {
                 use std::os::unix::fs::PermissionsExt;
                 let _ = std::fs::set_permissions(&out_path, std::fs::Permissions::from_mode(0o755));
             }
-            binary_path = Some(out_path);
+            rel_binary = Some(rel_path);
         }
     }
 
-    binary_path.ok_or_else(|| "yt-dlp executable not found inside zip archive".to_owned())
+    rel_binary.ok_or_else(|| "yt-dlp executable not found inside zip archive".to_owned())
 }
 
 async fn install_onedir(client: &reqwest::Client, dir: &Path) -> Result<PathBuf, String> {
@@ -158,30 +266,25 @@ async fn install_onedir(client: &reqwest::Client, dir: &Path) -> Result<PathBuf,
         .map_err(|err| format!("yt-dlp extraction task failed: {err}"))?
 }
 
-/// Resolves a working `yt-dlp` binary path, downloading the zipapp (if `python3` is
-/// available) or the pre-extracted `onedir` bundle (no `/tmp` extraction) if missing.
+/// Resolves a working `yt-dlp` binary path without spawning `--version` probes.
 ///
-/// The resolved program is wrapped in a `nice` launcher when one is available, so a
-/// track extraction cannot starve the bot when the host is short on CPU.
+/// On `x86_64` Linux, prefers the pre-extracted `onedir` bundle over the compressed
+/// Python zipapp so every invocation skips zip decompression and bytecode compilation.
 pub async fn resolve_ytdlp_program(client: &reqwest::Client) -> Result<&'static str, String> {
     let resolved = YTDLP_PROGRAM
         .get_or_try_init(|| async {
             let program = resolve_installed_ytdlp(client).await?;
-            if let Some(wrapper) = low_priority_wrapper(&program) {
-                if is_executable(&wrapper).await {
-                    tracing::info!(
-                        program = %program,
-                        wrapper = %wrapper,
-                        "yt-dlp is launched at low CPU priority"
-                    );
-                    return Ok::<String, String>(wrapper);
-                }
-                tracing::warn!(
-                    wrapper = %wrapper,
-                    "the low-priority yt-dlp wrapper cannot run here; using yt-dlp directly"
+            if let Some((nice, level)) = nice_launcher() {
+                tracing::info!(
+                    program = %program,
+                    nice = %nice.display(),
+                    level = %level,
+                    "yt-dlp configured at low CPU priority"
                 );
+            } else {
+                tracing::info!(program = %program, "yt-dlp configured");
             }
-            Ok(program)
+            Ok::<String, String>(program)
         })
         .await?;
     Ok(resolved.as_str())
@@ -191,111 +294,118 @@ async fn resolve_installed_ytdlp(client: &reqwest::Client) -> Result<String, Str
     if let Ok(custom) = std::env::var("YTDLP_PATH") {
         let trimmed = custom.trim();
         if !trimmed.is_empty() {
-            if is_executable(trimmed).await {
-                return Ok(trimmed.to_owned());
-            }
-            return Err(format!("YTDLP_PATH '{trimmed}' is not executable"));
+            return resolve_executable(trimmed)
+                .ok_or_else(|| format!("YTDLP_PATH '{trimmed}' is not executable"));
         }
     }
 
-    if is_executable("yt-dlp").await {
-        return Ok("yt-dlp".to_owned());
+    for name in ["yt-dlp_linux", "yt-dlp"] {
+        if let Some(found) = resolve_executable(name) {
+            return Ok(found);
+        }
     }
 
     let dirs = cache_dirs();
-    for dir in &dirs {
-        for name in ["yt-dlp_linux", "yt-dlp"] {
-            let candidate = dir.join(name);
-            let path_str = candidate.to_string_lossy();
-            if candidate.exists() && is_executable(&path_str).await {
-                return Ok(path_str.into_owned());
+    if let Some(cached) = find_cached_binary(
+        &dirs,
+        &["onedir/yt-dlp_linux", "onedir/yt-dlp", "yt-dlp_linux"],
+    ) {
+        return Ok(cached);
+    }
+
+    let mut last_err = String::from("no writable path for yt-dlp");
+    if prefer_onedir() {
+        for dir in &dirs {
+            match install_onedir(client, dir).await {
+                Ok(bin) if is_executable_file(&bin) => {
+                    return Ok(bin.to_string_lossy().into_owned());
+                }
+                Ok(bin) => {
+                    last_err = format!("installed yt-dlp at {} is not executable", bin.display());
+                }
+                Err(err) => last_err = err,
+            }
+        }
+        if let Some(cached_zipapp) = find_cached_binary(&dirs, &["yt-dlp"]) {
+            tracing::warn!(
+                error = %last_err,
+                fallback = %cached_zipapp,
+                "could not install yt-dlp onedir bundle; falling back to cached zipapp"
+            );
+            return Ok(cached_zipapp);
+        }
+    } else if let Some(cached_zipapp) = find_cached_binary(&dirs, &["yt-dlp"]) {
+        return Ok(cached_zipapp);
+    }
+
+    if !cfg!(target_os = "linux") || resolve_executable("python3").is_some() {
+        for dir in &dirs {
+            match install_zipapp(client, dir).await {
+                Ok(bin) if is_executable_file(&bin) => {
+                    return Ok(bin.to_string_lossy().into_owned());
+                }
+                Ok(bin) => {
+                    last_err = format!("installed yt-dlp at {} is not executable", bin.display());
+                }
+                Err(err) => last_err = err,
             }
         }
     }
 
-    let has_python = is_executable("python3").await;
-    let mut last_err = String::from("no writable path for yt-dlp");
-    for dir in &dirs {
-        let installed = if has_python {
-            install_zipapp(client, dir).await
-        } else if cfg!(target_os = "linux") {
-            install_onedir(client, dir).await
-        } else {
-            install_zipapp(client, dir).await
-        };
-        match installed {
-            Ok(bin) => {
-                let path_str = bin.to_string_lossy().into_owned();
-                if is_executable(&path_str).await {
-                    return Ok(path_str);
-                }
-                last_err = format!("installed yt-dlp at {path_str} is not executable");
-            }
-            Err(err) => last_err = err,
-        }
-    }
     Err(last_err)
 }
 
-/// Writes a `nice` launcher for `program`, so `yt-dlp` runs at a lower CPU priority
-/// than the bot itself.
-///
-/// `yt-dlp` is a full Python process whose `YouTube` extraction is CPU-bound; on a
-/// container limited to one or two cores it otherwise delays gateway heartbeats and
-/// slash-command replies. `NESTLY_YTDLP_NICE` overrides the adjustment (an empty
-/// value, `0` or `off` disables the wrapper). Returns `None` whenever the wrapper
-/// cannot be created, so callers fall back to running `program` directly.
 #[cfg(unix)]
-fn low_priority_wrapper(program: &str) -> Option<String> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let level = std::env::var("NESTLY_YTDLP_NICE").unwrap_or_else(|_| "10".to_owned());
-    let level = level.trim();
-    if level.is_empty() || level == "0" || level.eq_ignore_ascii_case("off") {
-        return None;
-    }
-    let nice = which("nice")?;
-
-    let dir = runtime_dir();
-    std::fs::create_dir_all(&dir).ok()?;
-    let wrapper = dir.join("yt-dlp-nice");
-    let quoted = program.replace('\'', r"'\''");
-    let script = format!(
-        "#!/bin/sh\n# generated by nestly: run yt-dlp at low CPU priority\nexec {} -n {} '{}' \"$@\"\n",
-        nice.display(),
-        level,
-        quoted
-    );
-    if std::fs::read_to_string(&wrapper).ok().as_deref() != Some(script.as_str()) {
-        std::fs::write(&wrapper, script).ok()?;
-        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).ok()?;
-    }
-    Some(wrapper.to_string_lossy().into_owned())
+fn nice_launcher() -> Option<(&'static Path, String)> {
+    nice_launcher_from(std::env::var("NESTLY_YTDLP_NICE").ok().as_deref())
 }
 
-/// No-op on platforms without `nice`.
+#[cfg(unix)]
+fn nice_launcher_from(override_level: Option<&str>) -> Option<(&'static Path, String)> {
+    static NICE_BIN: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+    let raw = override_level.unwrap_or(DEFAULT_YTDLP_NICE).trim();
+    if raw.is_empty() || raw == "0" || raw.eq_ignore_ascii_case("off") {
+        return None;
+    }
+    let nice = NICE_BIN.get_or_init(|| which("nice")).as_deref()?;
+    Some((nice, raw.to_owned()))
+}
+
 #[cfg(not(unix))]
-fn low_priority_wrapper(_program: &str) -> Option<String> {
+fn nice_launcher() -> Option<(&'static Path, String)> {
     None
 }
 
-#[cfg(unix)]
-fn runtime_dir() -> PathBuf {
-    if let Ok(state_dir) = std::env::var("NESTLY_STATE_DIR") {
-        let trimmed = state_dir.trim();
-        if !trimmed.is_empty() {
-            return PathBuf::from(trimmed).join("runtime");
-        }
-    }
-    std::env::temp_dir().join("nestly-runtime")
+fn build_ytdlp_command(ytdlp_program: &str, target: &str) -> Command {
+    let mut cmd = if let Some((nice, level)) = nice_launcher() {
+        let mut c = Command::new(nice);
+        c.arg("-n").arg(level).arg(ytdlp_program);
+        c
+    } else {
+        Command::new(ytdlp_program)
+    };
+    cmd.stdin(Stdio::null());
+    cmd.kill_on_drop(true);
+    cmd.args([
+        "-S",
+        "acodec:opus",
+        "-j",
+        "-f",
+        "ba[abr>0][vcodec=none]/best",
+        "--no-playlist",
+        "--no-warnings",
+        "--",
+        target,
+    ]);
+    cmd
 }
 
-#[cfg(unix)]
 fn which(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|dir| dir.join(name))
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| is_executable_file(candidate))
 }
 
 /// Supported providers for music search.
@@ -373,17 +483,35 @@ pub async fn resolve_track(
     client: reqwest::Client,
     target: String,
 ) -> Result<ResolvedTrack, String> {
-    // `-S acodec:opus` prefers the WebM/Opus stream: 48 kHz with 20 ms frames, which
-    // Songbird forwards to Discord verbatim ("passthrough") instead of decoding,
-    // resampling and re-encoding it. It is a preference, so platforms without Opus
-    // still resolve.
-    let mut source = YoutubeDl::new_ytdl_like(ytdlp_program, client.clone(), target)
-        .user_args(vec!["-S".to_owned(), "acodec:opus".to_owned()]);
-
-    let mut results = source
-        .query(1)
+    let _permit = YTDLP_SEMAPHORE
+        .acquire()
         .await
-        .map_err(|err| format!("cannot resolve the track: {err}"))?;
+        .map_err(|err| format!("yt-dlp semaphore closed: {err}"))?;
+
+    let mut cmd = build_ytdlp_command(ytdlp_program, &target);
+    let output = tokio::time::timeout(YTDLP_TIMEOUT, cmd.output())
+        .await
+        .map_err(|_| format!("yt-dlp timed out after {}s", YTDLP_TIMEOUT.as_secs()))?
+        .map_err(|err| format!("cannot run {ytdlp_program}: {err}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = stderr.trim();
+        return Err(if detail.is_empty() {
+            format!("{ytdlp_program} failed with {}", output.status)
+        } else {
+            format!("{ytdlp_program} failed with {}: {detail}", output.status)
+        });
+    }
+
+    let mut results = output
+        .stdout
+        .split(|&b| b == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(serde_json::from_slice::<YoutubeDlOutput>)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| format!("invalid yt-dlp metadata JSON: {err}"))?;
+
     if results.is_empty() {
         return Err("yt-dlp returned no playable result".to_owned());
     }
@@ -548,5 +676,64 @@ mod tests {
         );
         assert_eq!(AudioProvider::from_str("sc"), AudioProvider::Soundcloud);
         assert_eq!(AudioProvider::from_str("anything"), AudioProvider::Youtube);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executable_check_does_not_spawn_process() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let log = dir.path().join("invoked.log");
+        let bin = dir.path().join("yt-dlp_linux");
+        let script = format!("#!/bin/sh\necho invoked >> '{}'\n", log.display());
+        std::fs::write(&bin, script).expect("write binary");
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+
+        let found = super::find_cached_binary(
+            &[dir.path().to_path_buf()],
+            &["onedir/yt-dlp_linux", "yt-dlp_linux"],
+        );
+        assert_eq!(found.as_deref(), Some(bin.to_string_lossy().as_ref()));
+        assert!(
+            !log.exists(),
+            "binary check must inspect filesystem permissions without executing the binary"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nice_launcher_respects_disable_overrides() {
+        assert!(super::nice_launcher_from(Some("0")).is_none());
+        assert!(super::nice_launcher_from(Some("off")).is_none());
+        assert!(super::nice_launcher_from(Some("OFF")).is_none());
+        assert!(super::nice_launcher_from(Some("   ")).is_none());
+        if let Some((_path, level)) = super::nice_launcher_from(None) {
+            assert_eq!(level, super::DEFAULT_YTDLP_NICE);
+        }
+    }
+
+    #[test]
+    fn extract_onedir_zip_installs_atomically() {
+        use std::io::Write;
+
+        let mut buf = Vec::new();
+        {
+            let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            let opts = zip::write::SimpleFileOptions::default();
+            writer.start_file("yt-dlp_linux", opts).unwrap();
+            writer.write_all(b"#!/bin/sh\necho ok\n").unwrap();
+            writer.start_file("_internal/libpython.so", opts).unwrap();
+            writer.write_all(b"dummy").unwrap();
+            writer.finish().unwrap();
+        }
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let bin = super::extract_onedir_zip(&buf, dir.path()).expect("extract succeeds");
+        assert_eq!(bin, dir.path().join("onedir/yt-dlp_linux"));
+        assert!(bin.exists());
+        assert!(dir.path().join("onedir/_internal/libpython.so").exists());
+        assert!(!dir.path().join("onedir.tmp").exists());
+        assert!(!dir.path().join("onedir.old").exists());
     }
 }

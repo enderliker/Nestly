@@ -5,7 +5,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ffmpeg \
     python3 \
- && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+ && arch="$(dpkg --print-architecture)" \
+ && if [ "$arch" = "amd64" ]; then \
+      curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux.zip -o /tmp/yt-dlp.zip \
+      && python3 -m zipfile -e /tmp/yt-dlp.zip /usr/local/lib/yt-dlp \
+      && rm -f /tmp/yt-dlp.zip \
+      && chmod a+rx /usr/local/lib/yt-dlp/yt-dlp_linux \
+      && printf '#!/bin/sh\nexec /usr/local/lib/yt-dlp/yt-dlp_linux "$@"\n' > /usr/local/bin/yt-dlp; \
+    else \
+      curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp; \
+    fi \
  && chmod a+rx /usr/local/bin/yt-dlp \
  && apt-get purge -y curl \
  && apt-get autoremove -y \

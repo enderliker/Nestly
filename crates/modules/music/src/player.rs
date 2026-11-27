@@ -9,6 +9,7 @@ use songbird::events::{Event, EventContext, EventHandler as VoiceEventHandler, T
 use songbird::input::Input;
 use songbird::tracks::TrackHandle;
 use songbird::{Config, ConnectionInfo};
+use tokio::sync::mpsc;
 
 struct TrackErrorLogger;
 
@@ -26,6 +27,23 @@ impl VoiceEventHandler for TrackErrorLogger {
             }
         }
         None
+    }
+}
+
+struct TrackEndNotifier {
+    guild_id: u64,
+    tx: mpsc::UnboundedSender<(u64, TrackHandle)>,
+}
+
+#[async_trait::async_trait]
+impl VoiceEventHandler for TrackEndNotifier {
+    async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
+        if let EventContext::Track(tracks) = ctx {
+            for (_state, handle) in *tracks {
+                let _ = self.tx.send((self.guild_id, (*handle).clone()));
+            }
+        }
+        Some(Event::Cancel)
     }
 }
 
@@ -53,14 +71,30 @@ pub struct GuildPlayer {
     pub endpoint: Option<String>,
     pub token: Option<String>,
     pub is_paused: bool,
+    end_tx: Option<mpsc::UnboundedSender<(u64, TrackHandle)>>,
 }
 
 impl GuildPlayer {
     #[must_use]
     pub fn new(guild_id: u64) -> Self {
+        Self::create(guild_id, None)
+    }
+
+    #[must_use]
+    pub fn with_end_notifier(
+        guild_id: u64,
+        end_tx: mpsc::UnboundedSender<(u64, TrackHandle)>,
+    ) -> Self {
+        Self::create(guild_id, Some(end_tx))
+    }
+
+    fn create(guild_id: u64, end_tx: Option<mpsc::UnboundedSender<(u64, TrackHandle)>>) -> Self {
+        // Each guild plays at most one track at volume 1.0, so soft-clipping can be
+        // skipped to save CPU on non-passthrough tracks.
+        let config = Config::default().use_softclip(false);
         Self {
             guild_id,
-            driver: Driver::new(Config::default()),
+            driver: Driver::new(config),
             queue: VecDeque::new(),
             current: None,
             handle: None,
@@ -70,6 +104,7 @@ impl GuildPlayer {
             endpoint: None,
             token: None,
             is_paused: false,
+            end_tx,
         }
     }
 
@@ -120,11 +155,41 @@ impl GuildPlayer {
 
     /// Starts playing a resolved track immediately on the driver.
     pub fn play_track(&mut self, track: QueuedTrack, input: Input) {
-        let handle = self.driver.play_input(input);
+        // `play_only_input` guarantees a single live track in the mixer so Opus
+        // passthrough is never disabled by an overlapping finishing track.
+        let handle = self.driver.play_only_input(input);
         let _ = handle.add_event(Event::Track(TrackEvent::Error), TrackErrorLogger);
+        if let Some(end_tx) = &self.end_tx {
+            let _ = handle.add_event(
+                Event::Track(TrackEvent::End),
+                TrackEndNotifier {
+                    guild_id: self.guild_id,
+                    tx: end_tx.clone(),
+                },
+            );
+        }
         self.handle = Some(handle);
         self.current = Some(track);
         self.is_paused = false;
+    }
+
+    /// Handles a natural track completion and starts the next queued track, if any.
+    ///
+    /// Ignores stale completion events from tracks that were already skipped or stopped.
+    pub fn handle_track_end(&mut self, ended_handle: &TrackHandle) -> Option<QueuedTrack> {
+        let is_current = self
+            .handle
+            .as_ref()
+            .is_some_and(|current| current.uuid() == ended_handle.uuid());
+        if !is_current {
+            return None;
+        }
+        self.handle = None;
+        self.current = None;
+        self.is_paused = false;
+        let (next, input) = self.queue.pop_front()?;
+        self.play_track(next.clone(), input);
+        Some(next)
     }
 
     /// Skips the current track and starts the next queued track if available.
@@ -189,6 +254,7 @@ pub struct MusicManager {
     user_voice_channels: HashMap<(u64, u64), u64>,
     client: reqwest::Client,
     pub bot_user_id: Option<u64>,
+    end_tx: Option<mpsc::UnboundedSender<(u64, TrackHandle)>>,
 }
 
 impl MusicManager {
@@ -199,13 +265,43 @@ impl MusicManager {
             user_voice_channels: HashMap::new(),
             client,
             bot_user_id: None,
+            end_tx: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_end_notifier(
+        client: reqwest::Client,
+        end_tx: mpsc::UnboundedSender<(u64, TrackHandle)>,
+    ) -> Self {
+        Self {
+            players: HashMap::new(),
+            user_voice_channels: HashMap::new(),
+            client,
+            bot_user_id: None,
+            end_tx: Some(end_tx),
         }
     }
 
     pub fn player_mut(&mut self, guild_id: u64) -> &mut GuildPlayer {
+        let end_tx = self.end_tx.clone();
         self.players
             .entry(guild_id)
-            .or_insert_with(|| GuildPlayer::new(guild_id))
+            .or_insert_with(|| match end_tx {
+                Some(tx) => GuildPlayer::with_end_notifier(guild_id, tx),
+                None => GuildPlayer::new(guild_id),
+            })
+    }
+
+    /// Advances playback when a track finishes naturally in a guild.
+    pub fn handle_track_end(
+        &mut self,
+        guild_id: u64,
+        ended_handle: &TrackHandle,
+    ) -> Option<QueuedTrack> {
+        self.players
+            .get_mut(&guild_id)?
+            .handle_track_end(ended_handle)
     }
 
     pub fn player(&self, guild_id: u64) -> Option<&GuildPlayer> {
@@ -329,5 +425,38 @@ mod tests {
         assert!(player.now_playing().is_none());
         assert!(player.queue_list().is_empty());
         assert!(!player.is_connected);
+    }
+
+    #[tokio::test]
+    async fn player_track_end_advances_queue_and_ignores_stale_handles() {
+        let mut player = GuildPlayer::new(123);
+        let t1 = QueuedTrack {
+            target: "https://example.com/1.mp3".to_owned(),
+            title: "Track 1".to_owned(),
+            artist: "Artist 1".to_owned(),
+            duration_secs: Some(180),
+            requester_id: None,
+        };
+        let t2 = QueuedTrack {
+            target: "https://example.com/2.mp3".to_owned(),
+            title: "Track 2".to_owned(),
+            artist: "Artist 2".to_owned(),
+            duration_secs: Some(210),
+            requester_id: None,
+        };
+
+        player.enqueue(t1, dummy_input("1.mp3"));
+        let first_handle = player.handle.clone().expect("first handle");
+        player.enqueue(t2.clone(), dummy_input("2.mp3"));
+
+        // Skip moves to Track 2, so the stale end event for Track 1 must be ignored.
+        assert_eq!(player.skip(), Some(t2.clone()));
+        assert_eq!(player.handle_track_end(&first_handle), None);
+        assert_eq!(player.now_playing(), Some(&t2));
+
+        // When Track 2 itself ends, current clears cleanly.
+        let second_handle = player.handle.clone().expect("second handle");
+        assert_eq!(player.handle_track_end(&second_handle), None);
+        assert!(player.now_playing().is_none());
     }
 }

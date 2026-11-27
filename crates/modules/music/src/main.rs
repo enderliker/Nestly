@@ -79,10 +79,7 @@ fn format_duration(seconds: Option<u64>) -> String {
 /// Reports a `music-play` failure through the deferred reply, if one was sent.
 async fn fail(context: &CommandContext, deferred: bool, message: &str) -> Result<Response, String> {
     if deferred {
-        let _ = context
-            .rest
-            .update_original(&context.interaction, message)
-            .await;
+        let _ = context.update_original(message).await;
         return Ok(Response::None);
     }
     Ok(Response::ephemeral(message))
@@ -127,13 +124,9 @@ async fn handle_play(
     };
 
     // Acknowledge inside Discord's 3 s window *before* the voice handshake and the
-    // `yt-dlp` extraction below: either can take seconds, and a late acknowledgement
-    // makes the interaction fail outright.
-    let deferred = context
-        .rest
-        .respond(&context.interaction, Response::Defer { ephemeral: false })
-        .await
-        .is_ok();
+    // `yt-dlp` extraction below, notifying the supervisor so it does not fire a
+    // timeout fallback.
+    let deferred = context.defer(false).await.is_ok();
 
     // Request the edge gateway to connect to the target voice channel
     if let Err(source) = context
@@ -213,10 +206,7 @@ async fn handle_play(
     };
 
     if deferred {
-        let _ = context
-            .rest
-            .update_original(&context.interaction, &response_text)
-            .await;
+        let _ = context.update_original(&response_text).await;
         Ok(Response::None)
     } else {
         Ok(Response::message(response_text))
@@ -370,7 +360,11 @@ async fn handle_queue(
 #[tokio::main(worker_threads = 2)]
 async fn main() -> ExitCode {
     let client = reqwest::Client::new();
-    let manager = Arc::new(Mutex::new(MusicManager::new(client)));
+    let (end_tx, mut end_rx) = tokio::sync::mpsc::unbounded_channel();
+    let manager = Arc::new(Mutex::new(MusicManager::with_end_notifier(
+        client.clone(),
+        end_tx,
+    )));
 
     // Try resolving application bot user id from DISCORD_APPLICATION_ID
     if let Ok(app_id_str) = std::env::var("DISCORD_APPLICATION_ID")
@@ -378,6 +372,30 @@ async fn main() -> ExitCode {
     {
         manager.lock().await.bot_user_id = Some(app_id);
     }
+
+    let end_mgr = manager.clone();
+    tokio::spawn(async move {
+        while let Some((guild_id, ended_handle)) = end_rx.recv().await {
+            let next = {
+                let mut mgr = end_mgr.lock().await;
+                mgr.handle_track_end(guild_id, &ended_handle)
+            };
+            if let Some(track) = next {
+                tracing::info!(guild_id, title = %track.title, "advancing to next queued track");
+            }
+        }
+    });
+
+    // Warm up `yt-dlp` (downloading the onedir bundle if needed) shortly after
+    // startup so `--boot-probe` finishes untouched while real deployments are
+    // ready before the first `/music-play`.
+    let warmup_client = client;
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        if let Err(err) = source::resolve_ytdlp_program(&warmup_client).await {
+            tracing::warn!(error = %err, "background yt-dlp warmup failed");
+        }
+    });
 
     let voice_state_mgr = manager.clone();
     let voice_server_mgr = manager.clone();

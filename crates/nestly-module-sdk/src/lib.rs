@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -194,9 +195,47 @@ pub struct CommandContext {
     pub interaction: nestly_ipc::InteractionPayload,
     pub rest: DiscordRest,
     control: ControlClient,
+    correlation: u64,
+    acked: Arc<AtomicBool>,
 }
 
 impl CommandContext {
+    /// Acknowledge the interaction with a deferred reply and notify the
+    /// supervisor so its 3-second acknowledgement timeout does not fire.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when Discord rejects the deferred response.
+    pub async fn defer(&self, ephemeral: bool) -> Result<(), ModuleError> {
+        self.rest
+            .respond(&self.interaction, Response::Defer { ephemeral })
+            .await?;
+        self.notify_acked().await;
+        Ok(())
+    }
+
+    /// Edit the original response for an interaction that was already deferred.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when Discord rejects the edit.
+    pub async fn update_original(&self, content: &str) -> Result<(), ModuleError> {
+        self.rest.update_original(&self.interaction, content).await
+    }
+
+    async fn notify_acked(&self) {
+        if !self.acked.swap(true, Ordering::AcqRel) && self.correlation != 0 {
+            let _ = self
+                .control
+                .tx
+                .send(Envelope::CommandAck {
+                    correlation: self.correlation,
+                    acked: true,
+                })
+                .await;
+        }
+    }
+
     /// Raw interaction data as JSON.
     #[must_use]
     pub fn data(&self) -> Option<Value> {
@@ -559,16 +598,20 @@ async fn read_loop(
                         .await;
                     continue;
                 };
+                let acked = Arc::new(AtomicBool::new(false));
                 let context = CommandContext {
                     module_id: module_id.clone(),
                     interaction: interaction.clone(),
                     rest: rest.clone(),
                     control: control.clone(),
+                    correlation,
+                    acked: acked.clone(),
                 };
                 let outbound = outbound.clone();
                 let rest = rest.clone();
                 tokio::spawn(async move {
                     let outcome = handler(context).await;
+                    let already_acked = acked.load(Ordering::Acquire);
                     match outcome {
                         Ok(Response::None) => {
                             let _ = outbound
@@ -579,18 +622,16 @@ async fn read_loop(
                                 })
                                 .await;
                         }
-                        Ok(response) => {
-                            let ack_required = !matches!(response, Response::None);
-                            match rest.respond(&interaction, response).await {
+                        Ok(response) if already_acked => {
+                            let edit_result = match response {
+                                Response::Message { content, .. }
+                                | Response::Update { content } => {
+                                    rest.update_original(&interaction, &content).await
+                                }
+                                Response::Defer { .. } | Response::None => Ok(()),
+                            };
+                            match edit_result {
                                 Ok(()) => {
-                                    if ack_required {
-                                        let _ = outbound
-                                            .send(Envelope::CommandAck {
-                                                correlation,
-                                                acked: true,
-                                            })
-                                            .await;
-                                    }
                                     let _ = outbound
                                         .send(Envelope::CommandResult {
                                             correlation,
@@ -600,7 +641,7 @@ async fn read_loop(
                                         .await;
                                 }
                                 Err(source) => {
-                                    error!(%correlation, error = %source, "failed to respond");
+                                    error!(%correlation, error = %source, "failed to update deferred response");
                                     let _ = outbound
                                         .send(Envelope::CommandResult {
                                             correlation,
@@ -611,6 +652,33 @@ async fn read_loop(
                                 }
                             }
                         }
+                        Ok(response) => match rest.respond(&interaction, response).await {
+                            Ok(()) => {
+                                let _ = outbound
+                                    .send(Envelope::CommandAck {
+                                        correlation,
+                                        acked: true,
+                                    })
+                                    .await;
+                                let _ = outbound
+                                    .send(Envelope::CommandResult {
+                                        correlation,
+                                        ok: true,
+                                        message: None,
+                                    })
+                                    .await;
+                            }
+                            Err(source) => {
+                                error!(%correlation, error = %source, "failed to respond");
+                                let _ = outbound
+                                    .send(Envelope::CommandResult {
+                                        correlation,
+                                        ok: false,
+                                        message: Some(source.to_string()),
+                                    })
+                                    .await;
+                            }
+                        },
                         Err(source) => {
                             warn!(%correlation, error = %source, "command handler failed");
                             let _ = outbound
@@ -692,3 +760,53 @@ pub fn fallback_message(reason: FallbackReason, module: &str) -> String {
 
 /// Re-export protocol types for modules that want structured logs.
 pub use nestly_ipc::{LogLevel as ModuleLogLevel, Role as ModuleRole};
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+
+    use nestly_ipc::{Envelope, InteractionPayload};
+    use tokio::sync::mpsc;
+
+    use super::{CommandContext, ControlClient, DiscordRest};
+
+    #[tokio::test]
+    async fn notify_acked_emits_command_ack_once() {
+        let (tx, mut rx) = mpsc::channel(4);
+        let ctx = CommandContext {
+            module_id: "music".to_owned(),
+            interaction: InteractionPayload {
+                id: 1,
+                application_id: 2,
+                kind: 2,
+                token: "tok".to_owned(),
+                guild_id: Some(3),
+                channel_id: Some(4),
+                user_id: Some(5),
+                command_name: Some("music-play".to_owned()),
+                custom_id: None,
+                data_json: None,
+            },
+            rest: DiscordRest {
+                client: Arc::new(twilight_http::Client::new("token".to_owned())),
+            },
+            control: ControlClient::new(tx),
+            correlation: 42,
+            acked: Arc::new(AtomicBool::new(false)),
+        };
+
+        ctx.notify_acked().await;
+        ctx.notify_acked().await;
+
+        let first = rx.recv().await.expect("CommandAck should be sent");
+        assert_eq!(
+            first,
+            Envelope::CommandAck {
+                correlation: 42,
+                acked: true,
+            }
+        );
+        assert!(rx.try_recv().is_err(), "CommandAck must be sent only once");
+    }
+}

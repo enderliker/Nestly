@@ -37,13 +37,12 @@ async fn plays_audio_in_test_voice_channel() {
         "https://www.youtube.com/watch?v=jNQXAC9IVRw",
         AudioProvider::Youtube,
     );
-    let mut ytdl = source::create_source(ytdlp, client.clone(), target.clone());
-    let metadata = source::fetch_metadata(&mut ytdl)
+    let resolved = source::resolve_track(ytdlp, client.clone(), target.clone())
         .await
-        .expect("metadata fetch should succeed");
+        .expect("track resolution should succeed");
     println!(
-        "Fetched metadata: {} by {} ({:?}s)",
-        metadata.title, metadata.artist, metadata.duration_secs
+        "Resolved: {} by {} ({:?}s)",
+        resolved.metadata.title, resolved.metadata.artist, resolved.metadata.duration_secs
     );
 
     let mut manager = MusicManager::new(client.clone());
@@ -109,16 +108,15 @@ async fn plays_audio_in_test_voice_channel() {
 
     let player = manager.player_mut(TEST_GUILD_ID);
     assert!(player.is_connected, "player failed to connect to voice");
-    player.ytdlp_program = ytdlp;
     player.enqueue(
         QueuedTrack {
             target,
-            title: metadata.title,
-            artist: metadata.artist,
-            duration_secs: metadata.duration_secs,
+            title: resolved.metadata.title,
+            artist: resolved.metadata.artist,
+            duration_secs: resolved.metadata.duration_secs,
             requester_id: None,
         },
-        client,
+        resolved.input,
     );
 
     let handle = player.handle.clone().expect("track handle must exist");

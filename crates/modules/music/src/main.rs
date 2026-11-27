@@ -76,6 +76,18 @@ fn format_duration(seconds: Option<u64>) -> String {
     }
 }
 
+/// Reports a `music-play` failure through the deferred reply, if one was sent.
+async fn fail(context: &CommandContext, deferred: bool, message: &str) -> Result<Response, String> {
+    if deferred {
+        let _ = context
+            .rest
+            .update_original(&context.interaction, message)
+            .await;
+        return Ok(Response::None);
+    }
+    Ok(Response::ephemeral(message))
+}
+
 async fn handle_play(
     context: &CommandContext,
     manager: &Arc<Mutex<MusicManager>>,
@@ -114,24 +126,29 @@ async fn handle_play(
         ));
     };
 
-    // Request the edge gateway to connect to the target voice channel
-    if let Err(source) = context
-        .voice_gateway_send(guild_id, Some(channel_id), false, false)
-        .await
-    {
-        tracing::error!(error = %source, "cannot send voice join command");
-        return Ok(Response::ephemeral(
-            "⚠️ Something went wrong while connecting to voice. Please try again.",
-        ));
-    }
-
+    // Acknowledge inside Discord's 3 s window *before* the voice handshake and the
+    // `yt-dlp` extraction below: either can take seconds, and a late acknowledgement
+    // makes the interaction fail outright.
     let deferred = context
         .rest
         .respond(&context.interaction, Response::Defer { ephemeral: false })
         .await
         .is_ok();
 
-    let target = source::resolve_query(&query, provider);
+    // Request the edge gateway to connect to the target voice channel
+    if let Err(source) = context
+        .voice_gateway_send(guild_id, Some(channel_id), false, false)
+        .await
+    {
+        tracing::error!(error = %source, "cannot send voice join command");
+        return fail(
+            context,
+            deferred,
+            "⚠️ Something went wrong while connecting to voice. Please try again.",
+        )
+        .await;
+    }
+
     let http_client = {
         let mgr = manager.lock().await;
         mgr.client()
@@ -141,38 +158,33 @@ async fn handle_play(
         Ok(program) => program,
         Err(err) => {
             tracing::error!(error = %err, "yt-dlp unavailable");
-            let msg = "⚠️ Something went wrong while preparing playback. Please try again.";
-            if deferred {
-                let _ = context
-                    .rest
-                    .update_original(&context.interaction, msg)
-                    .await;
-                return Ok(Response::None);
-            }
-            return Ok(Response::ephemeral(msg));
+            return fail(
+                context,
+                deferred,
+                "⚠️ Something went wrong while preparing playback. Please try again.",
+            )
+            .await;
         }
     };
 
-    let mut ytdl = source::create_source(ytdlp_program, http_client.clone(), target.clone());
-    let metadata = match source::fetch_metadata(&mut ytdl).await {
-        Ok(meta) => meta,
+    let target = source::resolve_query(&query, provider);
+    // One `yt-dlp` run per track: it yields both the metadata and the stream URL.
+    let resolved = match source::resolve_track(ytdlp_program, http_client, target.clone()).await {
+        Ok(resolved) => resolved,
         Err(err) => {
-            tracing::warn!(target = %target, error = %err, "failed to load track metadata");
-            let msg = "⚠️ Something went wrong while loading that track. Please try again.";
-            if deferred {
-                let _ = context
-                    .rest
-                    .update_original(&context.interaction, msg)
-                    .await;
-                return Ok(Response::None);
-            }
-            return Ok(Response::ephemeral(msg));
+            tracing::warn!(target = %target, error = %err, "failed to load track");
+            return fail(
+                context,
+                deferred,
+                "⚠️ Something went wrong while loading that track. Please try again.",
+            )
+            .await;
         }
     };
 
-    let title = metadata.title;
-    let artist = metadata.artist;
-    let duration_secs = metadata.duration_secs;
+    let title = resolved.metadata.title;
+    let artist = resolved.metadata.artist;
+    let duration_secs = resolved.metadata.duration_secs;
 
     let track = QueuedTrack {
         target,
@@ -185,9 +197,8 @@ async fn handle_play(
     let (was_empty, queue_len) = {
         let mut mgr = manager.lock().await;
         let player = mgr.player_mut(guild_id);
-        player.ytdlp_program = ytdlp_program;
         let empty = player.current.is_none();
-        player.enqueue(track, http_client);
+        player.enqueue(track, resolved.input);
         let len = player.queue.len();
         (empty, len)
     };
@@ -220,15 +231,10 @@ async fn handle_skip(
         return Ok(Response::ephemeral("Can only be used in a server."));
     };
 
-    let http_client = {
-        let mgr = manager.lock().await;
-        mgr.client()
-    };
-
     let next_track = {
         let mut mgr = manager.lock().await;
         let player = mgr.player_mut(guild_id);
-        player.skip(http_client)
+        player.skip()
     };
 
     match next_track {
@@ -359,7 +365,9 @@ async fn handle_queue(
     Ok(Response::message(lines.join("\n")))
 }
 
-#[tokio::main(flavor = "current_thread")]
+// Two workers: a long `yt-dlp`-bound command handler must not stall the IPC
+// reader or the health heartbeat, which run on the same runtime.
+#[tokio::main(worker_threads = 2)]
 async fn main() -> ExitCode {
     let client = reqwest::Client::new();
     let manager = Arc::new(Mutex::new(MusicManager::new(client)));

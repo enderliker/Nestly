@@ -2049,7 +2049,7 @@ dependencies = [
 
 [[package]]
 name = "nestly-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "aho-corasick",
  "regex",
@@ -2062,7 +2062,7 @@ dependencies = [
 
 [[package]]
 name = "nestly-edge"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "futures-util",
  "nestly-core",
@@ -2081,7 +2081,7 @@ dependencies = [
 
 [[package]]
 name = "nestly-ipc"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "bytes",
  "futures-util",
@@ -2095,7 +2095,7 @@ dependencies = [
 
 [[package]]
 name = "nestly-mod-music"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "async-trait",
  "nestly-core",
@@ -2105,6 +2105,7 @@ dependencies = [
  "serde_json",
  "songbird",
  "symphonia",
+ "tempfile",
  "tokio",
  "tracing",
  "twilight-gateway 0.18.0",
@@ -2114,7 +2115,7 @@ dependencies = [
 
 [[package]]
 name = "nestly-mod-ops"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "nestly-core",
  "nestly-module-sdk",
@@ -2124,7 +2125,7 @@ dependencies = [
 
 [[package]]
 name = "nestly-module-sdk"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "futures-util",
  "nestly-core",
@@ -2142,7 +2143,7 @@ dependencies = [
 
 [[package]]
 name = "nestly-supervisor"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -2166,7 +2167,7 @@ dependencies = [
 
 [[package]]
 name = "nestly-sys"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "libc",
  "tempfile",

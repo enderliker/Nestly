@@ -6,6 +6,7 @@ use std::num::NonZeroU64;
 use nestly_module_sdk::{VoiceServerPayload, VoiceStatePayload};
 use songbird::driver::Driver;
 use songbird::events::{Event, EventContext, EventHandler as VoiceEventHandler, TrackEvent};
+use songbird::input::Input;
 use songbird::tracks::TrackHandle;
 use songbird::{Config, ConnectionInfo};
 
@@ -42,7 +43,8 @@ pub struct QueuedTrack {
 pub struct GuildPlayer {
     pub guild_id: u64,
     pub driver: Driver,
-    pub queue: VecDeque<QueuedTrack>,
+    /// Tracks already resolved to a playable input, oldest first.
+    pub queue: VecDeque<(QueuedTrack, Input)>,
     pub current: Option<QueuedTrack>,
     pub handle: Option<TrackHandle>,
     pub is_connected: bool,
@@ -51,7 +53,6 @@ pub struct GuildPlayer {
     pub endpoint: Option<String>,
     pub token: Option<String>,
     pub is_paused: bool,
-    pub ytdlp_program: &'static str,
 }
 
 impl GuildPlayer {
@@ -69,7 +70,6 @@ impl GuildPlayer {
             endpoint: None,
             token: None,
             is_paused: false,
-            ytdlp_program: "yt-dlp",
         }
     }
 
@@ -108,19 +108,18 @@ impl GuildPlayer {
         true
     }
 
-    /// Enqueues a track. If nothing is currently playing, starts playback immediately.
-    pub fn enqueue(&mut self, track: QueuedTrack, client: reqwest::Client) {
+    /// Enqueues an already-resolved track. If nothing is currently playing, starts playback
+    /// immediately.
+    pub fn enqueue(&mut self, track: QueuedTrack, input: Input) {
         if self.current.is_none() {
-            self.play_track(track, client);
+            self.play_track(track, input);
         } else {
-            self.queue.push_back(track);
+            self.queue.push_back((track, input));
         }
     }
 
-    /// Starts playing a track immediately on the driver.
-    pub fn play_track(&mut self, track: QueuedTrack, client: reqwest::Client) {
-        let source = crate::source::create_source(self.ytdlp_program, client, track.target.clone());
-        let input: songbird::input::Input = source.into();
+    /// Starts playing a resolved track immediately on the driver.
+    pub fn play_track(&mut self, track: QueuedTrack, input: Input) {
         let handle = self.driver.play_input(input);
         let _ = handle.add_event(Event::Track(TrackEvent::Error), TrackErrorLogger);
         self.handle = Some(handle);
@@ -129,17 +128,14 @@ impl GuildPlayer {
     }
 
     /// Skips the current track and starts the next queued track if available.
-    pub fn skip(&mut self, client: reqwest::Client) -> Option<QueuedTrack> {
+    pub fn skip(&mut self) -> Option<QueuedTrack> {
         if let Some(handle) = self.handle.take() {
             let _ = handle.stop();
         }
         self.current = None;
-        if let Some(next) = self.queue.pop_front() {
-            self.play_track(next.clone(), client);
-            Some(next)
-        } else {
-            None
-        }
+        let (next, input) = self.queue.pop_front()?;
+        self.play_track(next.clone(), input);
+        Some(next)
     }
 
     /// Pauses or resumes the currently playing track.
@@ -183,7 +179,7 @@ impl GuildPlayer {
 
     #[must_use]
     pub fn queue_list(&self) -> Vec<&QueuedTrack> {
-        self.queue.iter().collect()
+        self.queue.iter().map(|(track, _)| track).collect()
     }
 }
 
@@ -269,6 +265,11 @@ impl MusicManager {
 mod tests {
     use super::{GuildPlayer, QueuedTrack};
 
+    /// A lazy input that is never opened: these tests only exercise queue bookkeeping.
+    fn dummy_input(name: &str) -> songbird::input::Input {
+        songbird::input::File::new(format!("/nonexistent/{name}")).into()
+    }
+
     #[tokio::test]
     async fn player_queue_and_skip() {
         let mut player = GuildPlayer::new(123);
@@ -290,24 +291,23 @@ mod tests {
             requester_id: Some(42),
         };
 
-        let client = reqwest::Client::new();
-        player.enqueue(t1.clone(), client.clone());
+        player.enqueue(t1.clone(), dummy_input("1.mp3"));
         assert_eq!(player.now_playing(), Some(&t1));
         assert!(player.queue_list().is_empty());
 
-        player.enqueue(t2.clone(), client.clone());
+        player.enqueue(t2.clone(), dummy_input("2.mp3"));
         assert_eq!(player.now_playing(), Some(&t1));
         assert_eq!(player.queue_list().len(), 1);
         assert_eq!(player.queue_list()[0], &t2);
 
         // Skip to next track
-        let next = player.skip(client.clone());
+        let next = player.skip();
         assert_eq!(next, Some(t2.clone()));
         assert_eq!(player.now_playing(), Some(&t2));
         assert!(player.queue_list().is_empty());
 
         // Skip when queue is empty
-        let empty = player.skip(client);
+        let empty = player.skip();
         assert_eq!(empty, None);
         assert!(player.now_playing().is_none());
     }
@@ -315,7 +315,6 @@ mod tests {
     #[tokio::test]
     async fn player_stop_resets_state() {
         let mut player = GuildPlayer::new(123);
-        let client = reqwest::Client::new();
         let t1 = QueuedTrack {
             target: "https://example.com/1.mp3".to_owned(),
             title: "Track 1".to_owned(),
@@ -323,7 +322,7 @@ mod tests {
             duration_secs: Some(180),
             requester_id: None,
         };
-        player.enqueue(t1, client);
+        player.enqueue(t1, dummy_input("1.mp3"));
         assert!(player.now_playing().is_some());
 
         player.stop();
